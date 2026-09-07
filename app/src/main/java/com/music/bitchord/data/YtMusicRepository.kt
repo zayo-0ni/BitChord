@@ -331,33 +331,47 @@ object YtMusicRepository {
      */
     suspend fun resolveAudio(song: Song): Song {
         if (!song.isVideo) return song
-        // A bilingual upload names the track twice, once per script, and only
-        // one of those names is the one the catalogue files it under — see
-        // [TrackMatcher.aliases]. Each naming is asked about separately, and
-        // each candidate is judged against the naming that found it.
-        for (target in TrackMatcher.aliases(TrackMatcher.targetOf(song))) {
+        // Written to [TrackLog], not just logcat: which words went to the
+        // search box is the whole story of a switch that found nothing, and
+        // until it was recorded per track, a Copy Log from a failing song
+        // showed the failure and none of its cause.
+        val targets = TrackMatcher.aliases(TrackMatcher.targetOf(song))
+        TrackLog.d(AUDIO_TAG, "resolving '${song.title}' by '${song.artist}'", song.videoId)
+        for (target in targets) {
             for (query in TrackMatcher.queries(target)) {
                 val candidates = search(query, SearchFilter.SONGS)
                     .getOrNull()
                     ?.filterIsInstance<SearchResult.Track>()
                     ?.map { it.song }
                     .orEmpty()
+                TrackLog.d(
+                    AUDIO_TAG,
+                    "  q=\"$query\" -> ${candidates.size} songs" +
+                        candidates.take(3).joinToString("") { " | '${it.title}' by '${it.artist}'" },
+                    song.videoId,
+                )
                 TrackMatcher.best(candidates, target)?.let { match ->
-                    Log.d(TAG, "audio switch: '${song.title}' -> '${match.title}' ($query)")
+                    TrackLog.d(AUDIO_TAG, "  matched '${match.title}' by '${match.artist}'", song.videoId)
                     return match
                 }
-                // Music-video timing is visual timing, not the audio release's
-                // timing. The manual switch may therefore use the exact official
-                // song/artist match even when the video has a long intro or outro.
                 TrackMatcher.bestOfficialAudioForVideo(candidates, target)?.let { match ->
-                    Log.d(TAG, "audio switch: accepted video/runtime drift '${song.title}' -> '${match.title}' ($query)")
+                    TrackLog.d(
+                        AUDIO_TAG,
+                        "  matched (video drift) '${match.title}' by '${match.artist}'",
+                        song.videoId,
+                    )
                     return match
+                }
+                if (candidates.isNotEmpty()) {
+                    TrackLog.d(AUDIO_TAG, "  none of those ${candidates.size} are this recording", song.videoId)
                 }
             }
         }
-        Log.w(TAG, "audio switch: no official song match for '${song.title}' by '${song.artist}'")
+        TrackLog.w(AUDIO_TAG, "no catalogue cut found after ${targets.size} reading(s)", song.videoId)
         return song
     }
+
+    private const val AUDIO_TAG = "AudioSwitch"
 
     /** Signed-in profile for the settings header. Null when signed out. */
     suspend fun account(): Result<Account> = call("account") {

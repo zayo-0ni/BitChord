@@ -135,6 +135,24 @@ object AutoAudioVersion {
     private suspend fun convertPending(player: Player) {
         val seen = mutableSetOf<String>()
 
+        // Why this entry was or was not taken up, recorded before anything is
+        // decided. A pass that skips a track leaves no other trace, and "no
+        // line at all" reads identically to "this code never ran" in a log
+        // someone is trying to diagnose from.
+        player.currentMediaItemIndex.takeIf { it in 0 until player.mediaItemCount }
+            ?.let { index -> player.getMediaItemAt(index) }
+            ?.let { item ->
+                val song = item.toSong()
+                TrackLog.d(
+                    TAG,
+                    "pass: '${song.title}' isVideo=${song.isVideo} " +
+                        "settled=${item.mediaId in settled} " +
+                        "attempts=${attempts[item.mediaId] ?: 0}/$MAX_ATTEMPTS " +
+                        "pinned=${OriginalVersion.isPinned(item.mediaId)}",
+                    item.mediaId,
+                )
+            }
+
         // The playing entry is resolved before a note of it is heard, with
         // playback held for as long as that takes. Converting it underneath a
         // track already running is what the swap-and-seek in [apply] exists
