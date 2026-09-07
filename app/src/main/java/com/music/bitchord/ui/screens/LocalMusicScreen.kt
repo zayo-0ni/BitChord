@@ -162,7 +162,7 @@ fun LocalMusicScreen(
     modifier: Modifier = Modifier,
 ) {
     // Which top-level tab is selected.
-    var selectedTab by rememberSaveable { mutableIntStateOf(LOCAL_TAB_SONGS) }
+    var selectedTab by rememberSaveable(isDownloads) { mutableIntStateOf(LOCAL_TAB_SONGS) }
 
     // Narrows whichever tab is showing — songs by title/artist/album, artists
     // and albums by name. Not saved across process death: a filter left on a
