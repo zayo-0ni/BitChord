@@ -10,6 +10,7 @@ import com.music.bitchord.BuildConfig
 import com.music.bitchord.auth.AuthStore
 import com.music.bitchord.data.lyrics.LyricsSource
 import com.music.bitchord.data.sources.SourceKind
+import com.music.bitchord.playback.AutoAudioVersion
 import kotlinx.coroutines.flow.MutableStateFlow
 
 /**
@@ -248,6 +249,19 @@ object AppSettings {
     /** The CPU budget used by Beat This! and vocal analysis for Automix. */
     val automixPerformanceMode = MutableStateFlow(AutomixPerformanceMode.BALANCED)
     val skipSilence = MutableStateFlow(false)
+
+    /**
+     * Whether a music-video entry in the queue is swapped for the catalogue
+     * audio release by itself, instead of waiting for the 🎵 control.
+     *
+     * On by default: a music app's normal answer for "play this song" is the
+     * song, and the video cut brings a 16:9 thumbnail where the album art
+     * belongs and, often, an intro the release does not have. Off restores the
+     * behaviour where the swap only ever happens by hand.
+     *
+     * See [com.music.bitchord.playback.AutoAudioVersion].
+     */
+    val autoAudioVersion = MutableStateFlow(true)
 
     /** Requested PCM representation at the Android AudioTrack boundary. */
     val outputPcmMode = MutableStateFlow(OutputPcmMode.PCM_16)
@@ -623,6 +637,7 @@ object AppSettings {
             )
         }.getOrDefault(AutomixPerformanceMode.BALANCED)
         skipSilence.value = prefs.getBoolean(KEY_SKIP_SILENCE, false)
+        autoAudioVersion.value = prefs.getBoolean(KEY_AUTO_AUDIO_VERSION, true)
         outputPcmMode.value = runCatching {
             OutputPcmMode.valueOf(
                 prefs.getString(KEY_OUTPUT_PCM_MODE, OutputPcmMode.PCM_16.name)
@@ -860,6 +875,21 @@ object AppSettings {
     fun setSkipSilence(value: Boolean) {
         skipSilence.value = value
         prefs.edit().putBoolean(KEY_SKIP_SILENCE, value).apply()
+    }
+
+    /**
+     * Turning this off cancels any sweep in flight and clears the session's
+     * record of what has been tried, so a later re-enable starts fresh rather
+     * than skipping every entry the earlier pass had already looked at.
+     *
+     * Turning it on does not sweep from here — this object has no player to
+     * sweep. [PlaybackService][com.music.bitchord.playback.PlaybackService]
+     * watches [autoAudioVersion] and starts the pass on the queue it holds.
+     */
+    fun setAutoAudioVersion(value: Boolean) {
+        autoAudioVersion.value = value
+        prefs.edit().putBoolean(KEY_AUTO_AUDIO_VERSION, value).apply()
+        if (!value) AutoAudioVersion.reset()
     }
 
     fun setDolbyAtmos(value: Boolean) {
@@ -1403,6 +1433,7 @@ object AppSettings {
     private const val KEY_SMART_FADE = "smart_fade_enabled"
     private const val KEY_AUTOMIX_PERFORMANCE_MODE = "automix_performance_mode"
     private const val KEY_SKIP_SILENCE = "skip_silence"
+    private const val KEY_AUTO_AUDIO_VERSION = "auto_audio_version"
     private const val KEY_OUTPUT_PCM_MODE = "output_pcm_mode"
     private const val KEY_PREFER_USB_DAC = "prefer_usb_dac"
     private const val KEY_DOLBY_ATMOS = "dolby_atmos"

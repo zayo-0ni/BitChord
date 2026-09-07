@@ -174,6 +174,7 @@ fun SettingsScreen(
     val smartFade by AppSettings.smartFadeEnabled.collectAsStateWithLifecycle()
     val automixPerformance by AppSettings.automixPerformanceMode.collectAsStateWithLifecycle()
     val skipSilence by AppSettings.skipSilence.collectAsStateWithLifecycle()
+    val autoAudioVersion by AppSettings.autoAudioVersion.collectAsStateWithLifecycle()
     val dolbyAtmos by AppSettings.dolbyAtmos.collectAsStateWithLifecycle()
     // A property of the hardware, so it is read once rather than remembered
     // against a key that can never change — see [DeviceCodecs.playsDolbyAtmos],
@@ -524,6 +525,23 @@ fun SettingsScreen(
                     )
                 },
                 onClick = { AppSettings.setSkipSilence(!skipSilence) },
+            )
+            RowDivider()
+            SettingsRow(
+                icon = Icons.Rounded.LibraryMusic,
+                title = stringResource(R.string.auto_audio_version),
+                subtitle = stringResource(R.string.auto_audio_version_subtitle),
+                trailing = {
+                    Switch(
+                        checked = autoAudioVersion,
+                        onCheckedChange = AppSettings::setAutoAudioVersion,
+                        colors = SwitchDefaults.colors(
+                            checkedTrackColor = MaterialTheme.colorScheme.primary,
+                            checkedBorderColor = MaterialTheme.colorScheme.primary,
+                        ),
+                    )
+                },
+                onClick = { AppSettings.setAutoAudioVersion(!autoAudioVersion) },
             )
             RowDivider()
             SettingsRow(

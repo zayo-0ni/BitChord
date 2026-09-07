@@ -687,6 +687,11 @@ class PlaybackService : MediaLibraryService() {
             if (reason == Player.TIMELINE_CHANGE_REASON_PLAYLIST_CHANGED) {
                 saveQueueSnapshot(exoPlayer)
                 mediaSession?.setCustomLayout(notificationButtons())
+                // Every route a queue can arrive by ends here — a list tapped
+                // in the app, Android Auto, a deep link, AutoPlay's extension,
+                // the snapshot restored after a restart — which is why the
+                // audio-version pass hangs off this and not off playSongs.
+                AutoAudioVersion.sweep(exoPlayer, scope)
             }
         }
     }
@@ -3835,6 +3840,15 @@ class PlaybackService : MediaLibraryService() {
     private fun observeSettings() {
         scope.launch {
             AppSettings.skipSilence.collect { on -> eachPlayer { it.skipSilenceEnabled = on } }
+        }
+        scope.launch {
+            // drop(1) because the value at startup is handled by the timeline
+            // change that loads the restored queue; this is only for the
+            // listener turning it on with a queue already sitting there, where
+            // no timeline change is coming to trigger the pass.
+            AppSettings.autoAudioVersion.drop(1).collect { on ->
+                if (on) player?.let { AutoAudioVersion.sweep(it, scope) }
+            }
         }
         scope.launch {
             AppSettings.preferUsbDac.drop(1).collect { requestOutputReconfiguration() }

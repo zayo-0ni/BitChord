@@ -215,6 +215,8 @@
     <string name="automix_mode_performance_subtitle">4 threads · fastest analysis · higher heat and battery use</string>
     <string name="skip_silence">Skip silence</string>
     <string name="skip_silence_subtitle">Trim gaps longer than a second</string>
+    <string name="auto_audio_version">Prefer audio version</string>
+    <string name="auto_audio_version_subtitle">Swap music videos for the catalogue track and its album art</string>
     <string name="equalizer">Equalizer</string>
     <string name="equalizer_subtitle">Your device\'s system panel</string>
     <string name="show_nerd_stats">Show stats for nerds</string>
