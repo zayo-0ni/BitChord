@@ -87,7 +87,7 @@ object TrackMatcher {
     }
 
     /**
-     * The same recording under each name a bilingual upload gives it.
+     * The same recording under each name its upload title gives it.
      *
      * A great many music-video uploads title themselves twice, once per script,
      * with a pipe between:
@@ -109,6 +109,12 @@ object TrackMatcher {
      * knows how to read. The catalogue lists this track in Arabic, so it is the
      * Arabic segment that finds it.
      *
+     * None of this is about Arabic, or about pipes. `The Weeknd - Blinding
+     * Lights (Official Video)` uploaded by `TheWeekndVEVO` fails in exactly the
+     * same place and for exactly the same reason — the channel is not the
+     * artist — and searches for `the weeknd theweekndvevo`. A title with no
+     * pipe is simply a single segment, and gets read the same way.
+     *
      * This widens what is *asked*, never what is accepted: every candidate that
      * comes back is still judged by [best] or [bestOfficialAudioForVideo]
      * against the segment that found it, title and credit both. A search that
@@ -116,27 +122,45 @@ object TrackMatcher {
      * failure — not a bar set too high, a question asked about the wrong words.
      */
     fun aliases(target: Target): List<Target> {
-        val segments = target.title.split(PIPE).map { it.trim() }.filter { it.isNotBlank() }
-        if (segments.size < 2) return listOf(target)
-        val out = mutableListOf(target)
-        for (raw in segments) {
+        val derived = mutableListOf<Target>()
+        for (raw in target.title.split(PIPE).map { it.trim() }.filter { it.isNotBlank() }) {
             val segment = withoutReleaseYear(raw)
             val dash = DASH.find(segment)
-            if (dash == null) {
-                out += target.copy(title = segment)
-                continue
-            }
-            val credit = segment.substring(0, dash.range.first).trim()
-            val rest = segment.substring(dash.range.last + 1).trim()
-            // Both halves have to be there for the segment to be an
+            val credit = dash?.let { segment.substring(0, it.range.first).trim() }.orEmpty()
+            val rest = dash?.let { segment.substring(it.range.last + 1).trim() }.orEmpty()
+            // Both halves have to be there for the segment to read as
             // "Artist - Title": a leading or trailing dash is punctuation.
-            if (credit.isBlank() || rest.isBlank()) {
-                out += target.copy(title = segment)
-                continue
+            derived += if (credit.isNotBlank() && rest.isNotBlank()) {
+                target.copy(title = segment, artist = credit)
+            } else {
+                target.copy(title = segment)
             }
-            out += target.copy(title = segment, artist = credit)
         }
-        return out.distinctBy { it.title to it.artist }
+        // The reading that comes first is the one the extra round trip is spent
+        // on first, and on the hold-before-play path that is time the listener
+        // waits in silence. So the untouched target leads unless it is known to
+        // be the broken one.
+        val order = if (readsAsItsOwnCredit(target)) derived + target else listOf(target) + derived
+        return order.distinctBy { it.title to it.artist }
+    }
+
+    /**
+     * Whether [parseTitle] has resolved this title down to the artist's name.
+     *
+     * The exact signature of the failure [aliases] exists for: the head of the
+     * title's own dash is not the credit on the row, so it is kept as the title
+     * and the song's name is discarded as packaging. When that has happened the
+     * untouched target is worth nothing — it asks a catalogue for an artist's
+     * name — and the segment readings go first instead.
+     */
+    private fun readsAsItsOwnCredit(target: Target): Boolean {
+        val dash = DASH.find(target.title) ?: return false
+        val head = target.title.substring(0, dash.range.first)
+        val headCore = head.lowercase(Locale.ROOT).split(WORD_SPLIT)
+            .map { it.replace(NON_ALNUM, "") }
+            .filter { it.isNotEmpty() }
+            .joinToString("")
+        return headCore.isNotEmpty() && parseTitle(target.title, target.artist).core == headCore
     }
 
     /**
@@ -221,6 +245,7 @@ object TrackMatcher {
             .mapNotNull { candidate ->
                 val got = parseTitle(candidate.title, candidate.artist)
                 if (wanted.core != got.core || wanted.versions != got.versions) return@mapNotNull null
+                if (!featuresAccountedFor(wanted, target.artist, got)) return@mapNotNull null
                 val artist = artistScore(target.artist, candidate.artist) ?: return@mapNotNull null
                 val duration = target.durationSec?.let { expected ->
                     secondsOf(candidate.durationText)?.let { actual -> -abs(expected - actual) } ?: -120
@@ -275,6 +300,7 @@ object TrackMatcher {
         // land on the live take, and asking for the live take must not land on
         // the album cut.
         if (wanted.versions != got.versions) return null
+        if (!featuresAccountedFor(wanted, target.artist, got)) return null
 
         val creditedArtist = artistScore(target.artist, candidate.artist)
         val duration = durationScore(
@@ -392,6 +418,41 @@ object TrackMatcher {
     fun matches(candidate: Song, title: String, artist: String, durationSec: Int? = null): Boolean =
         score(candidate, Target(title, artist, durationSec)) != null
 
+    /**
+     * Whether every guest [got] credits is one the target already names.
+     *
+     * "Believer" and "Believer (feat. Lil Wayne)" are one title, one artist and
+     * one set of version markers apart from that credit, so every other test in
+     * here passes them as the same recording. They are not: one has a verse the
+     * other does not, and the listener who chose the first did not choose the
+     * second.
+     *
+     * Asymmetric on purpose. A guest the target names and the candidate does
+     * not is the ordinary disagreement about where a credit gets printed —
+     * catalogues move `feat.` between the title and the artist field constantly,
+     * and refusing that pairing is what kept whole modules out of use. A guest
+     * the candidate names and the target has nowhere at all is a different
+     * recording, and that is the direction this rules out.
+     */
+    private fun featuresAccountedFor(
+        wanted: TitleParts,
+        wantedArtist: String,
+        got: TitleParts,
+    ): Boolean {
+        if (got.features.isEmpty()) return true
+        val named = buildSet {
+            addAll(wanted.features)
+            addAll(wanted.words)
+            addAll(wanted.context)
+            addAll(
+                wantedArtist.lowercase(Locale.ROOT).split(WORD_SPLIT)
+                    .map { it.replace(NON_ALNUM, "") }
+                    .filter { it.isNotEmpty() },
+            )
+        }
+        return got.features.all { it in named }
+    }
+
     // ── Title ───────────────────────────────────────────────────────────────
 
     /**
@@ -407,11 +468,25 @@ object TrackMatcher {
         val versions: Set<String>,
         /** Words dropped with the packaging. A hint for scoring, never a veto. */
         val context: Set<String>,
+        /**
+         * Guests named by a `feat.` credit printed in the title.
+         *
+         * Kept apart from [context] because they are not packaging. A catalogue
+         * that prints "Believer (feat. Lil Wayne)" is not spelling "Believer"
+         * differently, it is holding a second recording with a verse the first
+         * one does not have — and the credit is the only thing in the listing
+         * that says so, since both are by Imagine Dragons and both are called
+         * Believer. Dropped into context, that credit became a scoring hint
+         * that nothing vetoes on, and the feature swapped itself in for the
+         * song the listener chose.
+         */
+        val features: Set<String>,
     )
 
     internal fun parseTitle(raw: String, artist: String = ""): TitleParts {
         val versions = sortedSetOf<String>()
         val context = mutableSetOf<String>()
+        val features = mutableSetOf<String>()
         var text = raw.lowercase(Locale.ROOT).replace("&", " and ")
 
         // Bracketed asides, innermost first: "(From "Satyamev Jayate")",
@@ -419,14 +494,14 @@ object TrackMatcher {
         repeat(BRACKET_PASSES) {
             if (!BRACKETED.containsMatchIn(text)) return@repeat
             text = BRACKETED.replace(text) { match ->
-                classify(match.groupValues[1], versions, context)
+                classify(match.groupValues[1], versions, context, features)
                 " "
             }
         }
         // An unbalanced bracket — a title truncated mid-aside — takes the rest
         // of the line with it rather than leaving half an aside in the core.
         text.indexOfFirst { it == '(' || it == '[' }.takeIf { it >= 0 }?.let { open ->
-            classify(text.substring(open), versions, context)
+            classify(text.substring(open), versions, context, features)
             text = text.substring(0, open)
         }
 
@@ -439,16 +514,23 @@ object TrackMatcher {
             val head = text.substring(0, dash.range.first)
             val tail = text.substring(dash.range.last + 1)
             text = if (isArtistName(head, artist)) {
-                classify(head, versions, context)
+                classify(head, versions, context, features)
                 tail
             } else {
-                classify(tail, versions, context)
+                classify(tail, versions, context, features)
                 head
             }
         }
 
         // A feat. credit belongs to the artist field wherever a catalogue
-        // chooses to print it.
+        // chooses to print it — but who is credited is kept, because a guest
+        // the other side never names is a different recording, not a different
+        // way of printing the same one.
+        FEATURING.find(text)?.let { credit ->
+            features += credit.value.split(WORD_SPLIT)
+                .map { it.replace(NON_ALNUM, "") }
+                .filter { it.isNotEmpty() && it !in FEATURE_MARKERS }
+        }
         text = text.replace(FEATURING, " ")
 
         var words = text.split(WORD_SPLIT)
@@ -466,6 +548,7 @@ object TrackMatcher {
             core = words.joinToString(""),
             versions = versions,
             context = context,
+            features = features,
         )
     }
 
@@ -484,6 +567,7 @@ object TrackMatcher {
         segment: String,
         versions: MutableSet<String>,
         context: MutableSet<String>,
+        features: MutableSet<String>,
     ) {
         val words = segment.split(WORD_SPLIT)
             .map { it.replace(NON_ALNUM, "") }
@@ -493,6 +577,11 @@ object TrackMatcher {
         val marks = words.filter { it in VERSION_WORDS }
         if (marks.isNotEmpty()) {
             versions += marks
+            return
+        }
+        // "(feat. Lil Wayne)", "[ft Drake]" — identity, not packaging.
+        if (words.first() in FEATURE_MARKERS) {
+            features += words.drop(1).filter { it.isNotEmpty() && it !in NOISE_WORDS }
             return
         }
         context += words.filter { it.length > 2 && it !in NOISE_WORDS }
@@ -683,6 +772,14 @@ object TrackMatcher {
 
     /** Pipe only — what separates one whole naming of a track from another. */
     private val PIPE = Regex("""\s*\|\s*""")
+    /**
+     * Words that introduce a guest credit. Deliberately not `with`, which
+     * [FEATURING] also strips: it is a real word in real titles, and treating
+     * "Dancing with Myself" as a credit for someone called Myself would veto
+     * the very match it was meant to protect.
+     */
+    private val FEATURE_MARKERS = setOf("feat", "ft", "featuring")
+
     private val FEATURING = Regex("""\b(feat|ft|featuring|with)\b.*""")
     private val WORD_SPLIT = Regex("""[\s.·]+""")
     /**
