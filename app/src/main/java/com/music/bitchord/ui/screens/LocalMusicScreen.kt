@@ -64,7 +64,8 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Tab
-import androidx.compose.material3.TabRow
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.TabRowDefaults
 import androidx.compose.material3.TabRowDefaults.tabIndicatorOffset
 import androidx.compose.material3.Text
@@ -99,6 +100,8 @@ import com.music.bitchord.data.model.isSameTrackAs
 import com.music.bitchord.data.settings.AppSettings
 import com.music.bitchord.data.settings.LibraryViewType
 import com.music.bitchord.data.settings.LocalMusicSort
+import com.music.bitchord.download.AlbumEntry
+import com.music.bitchord.download.albumEntries
 import com.music.bitchord.download.DownloadedCollection
 import com.music.bitchord.ui.components.MessageState
 import com.music.bitchord.ui.components.PAGE_GUTTER
@@ -115,6 +118,7 @@ import java.util.Locale
 private const val LOCAL_TAB_SONGS = 0
 private const val LOCAL_TAB_ARTISTS = 1
 private const val LOCAL_TAB_ALBUMS = 2
+private const val LOCAL_TAB_PLAYLISTS = 3
 
 /**
  * Local Music folder view with three tabs: Songs (default), Artists, Albums.
@@ -148,20 +152,7 @@ fun LocalMusicScreen(
      * here has a browse id to fetch, so this is the only way these get one.
      */
     onCollectionLongPress: ((String, List<Song>) -> Unit)? = null,
-    /**
-     * The albums and playlists that were downloaded *as* albums and playlists.
-     *
-     * They lead the Albums tab, because they are the only entries on it that the
-     * user actually asked for by name — the rest are groupings this screen
-     * derived from whatever album tag each file happens to carry, which is a
-     * good guess and nothing more. A playlist cannot be derived that way at all:
-     * its tracks are off forty different releases and no tag on any of them says
-     * which playlist they were pulled from, so without this a downloaded
-     * playlist simply scattered.
-     *
-     * Empty for Local Music, where nothing was asked for through this app and
-     * the tags are all there is.
-     */
+    /** Named offline folders, displayed in separate Albums and Playlists tabs. */
     collections: List<DownloadedCollection> = emptyList(),
     isDownloads: Boolean = false,
     currentSong: Song? = null,
@@ -297,7 +288,8 @@ fun LocalMusicScreen(
         )
 
         // ── Tab row ──────────────────────────────────────────────────────────
-        TabRow(
+        ScrollableTabRow(
+            edgePadding = 8.dp,
             selectedTabIndex = selectedTab,
             containerColor = MaterialTheme.colorScheme.background,
             contentColor = MaterialTheme.colorScheme.primary,
@@ -332,6 +324,15 @@ fun LocalMusicScreen(
                 selected = selectedTab == LOCAL_TAB_ALBUMS,
                 onClick = {
                     selectedTab = LOCAL_TAB_ALBUMS
+                    leaveDrillDown()
+                },
+            )
+            if (isDownloads) LocalTab(
+                icon = Icons.AutoMirrored.Rounded.QueueMusic,
+                label = stringResource(R.string.playlists),
+                selected = selectedTab == LOCAL_TAB_PLAYLISTS,
+                onClick = {
+                    selectedTab = LOCAL_TAB_PLAYLISTS
                     leaveDrillDown()
                 },
             )
@@ -448,9 +449,10 @@ fun LocalMusicScreen(
                 }
 
                 else -> {
-                    // LOCAL_TAB_ALBUMS
-                    val albums = remember(sortedSongs, collections, searchQuery) {
-                        albumEntries(sortedSongs, collections).filter {
+                    val playlists = key == "tab:$LOCAL_TAB_PLAYLISTS"
+                    val albums = remember(sortedSongs, collections, searchQuery, playlists) {
+                        albumEntries(if (playlists) emptyList() else sortedSongs,
+                            collections.filter { it.playlist == playlists }).filter {
                             searchQuery.isBlank() ||
                                 it.title.contains(searchQuery, ignoreCase = true) ||
                                 it.artist.contains(searchQuery, ignoreCase = true)
@@ -458,6 +460,7 @@ fun LocalMusicScreen(
                     }
                     AlbumsTab(
                         albums = albums,
+                        playlists = playlists,
                         viewType = viewType,
                         selectedKeys = selectedAlbumKeys,
                         onAlbumClick = { entry ->
@@ -837,92 +840,11 @@ private fun ArtistGridCard(
 
 // ── Albums tab ────────────────────────────────────────────────────────────────
 
-/**
- * One row of the Albums tab, whichever of the two things it came from.
- *
- * The tab used to be a `Map.Entry<String, List<Song>>` straight off a `groupBy`,
- * which was exactly as much as a tag grouping can say. A downloaded release
- * knows three more things — its own cover, whether it is a playlist rather than
- * an album, and the order its tracks go in — and none of those has anywhere to
- * live in a map entry.
- */
-private class AlbumEntry(
-    val title: String,
-    val artist: String,
-    val thumbnailUrl: String?,
-    /** Billed as a playlist rather than by artist; see [AlbumRow]. */
-    val playlist: Boolean,
-    /** Kept in the order it was downloaded in, which is the release's own. */
-    val songs: List<Song>,
-    /** Whether this is a release the user asked for, or a grouping inferred. */
-    val asked: Boolean,
-    /**
-     * What the list keys this row by — the release's own id where it has one.
-     *
-     * Not the title: an album and a playlist can be called the same thing (a
-     * self-titled record and its "This is …" mix, say), and two rows sharing a
-     * key is a crash out of `LazyColumn` rather than a cosmetic clash.
-     */
-    val key: String,
-)
-
-/**
- * The Albums tab's rows: the releases downloaded whole, then whatever else the
- * files' own album tags group up.
- *
- * The two are merged rather than shown as separate sections because they are the
- * same kind of thing to whoever is looking for one — a folder of songs with a
- * name they remember. What matters is only that the *named* ones win a collision:
- * an album downloaded whole also stamps its name onto each of its tracks (see
- * `withAlbum` in MainActivity), so without this every one of them would appear
- * twice, once with its cover and once without.
- *
- * Releases lead within their own alphabetical run rather than being sorted
- * together, because a tag grouping is a guess and a recorded release is not.
- */
-private fun albumEntries(
-    songs: List<Song>,
-    collections: List<DownloadedCollection>,
-): List<AlbumEntry> {
-    val asked = collections.map { collection ->
-        AlbumEntry(
-            title = collection.title,
-            artist = collection.subtitle.ifBlank {
-                collection.songs.firstOrNull()?.artist.orEmpty()
-            },
-            thumbnailUrl = collection.thumbnailUrl,
-            playlist = collection.playlist,
-            songs = collection.songs,
-            asked = true,
-            key = "asked:${collection.id}",
-        )
-    }
-    val claimed = asked.mapTo(HashSet()) { it.title.lowercase(Locale.ROOT) }
-    val derived = songs
-        .groupBy { it.albumName }
-        .mapNotNull { (name, group) ->
-            // Null is every track that never said what release it was off, and
-            // there is no row to draw for "no album" — those are the Songs tab's
-            // and nothing else's.
-            if (name == null || name.lowercase(Locale.ROOT) in claimed) return@mapNotNull null
-            AlbumEntry(
-                title = name,
-                artist = group.firstOrNull()?.artist.orEmpty(),
-                thumbnailUrl = group.firstNotNullOfOrNull { it.thumbnailUrl },
-                playlist = false,
-                songs = group,
-                asked = false,
-                key = "tagged:$name",
-            )
-        }
-    return (asked + derived).sortedWith(
-        compareByDescending<AlbumEntry> { it.asked }.thenBy { it.title.lowercase(Locale.ROOT) },
-    )
-}
-
+/** Album and playlist folders share the same browsing and selection controls. */
 @Composable
 private fun AlbumsTab(
     albums: List<AlbumEntry>,
+    playlists: Boolean = false,
     viewType: LibraryViewType,
     selectedKeys: Set<String> = emptySet(),
     onAlbumClick: (AlbumEntry) -> Unit,
@@ -946,15 +868,16 @@ private fun AlbumsTab(
         ) {
             item(span = { GridItemSpan(maxLineSpan) }) {
                 SectionHeader(
-                    icon = Icons.Rounded.Album,
-                    title = pluralStringResource(R.plurals.album_count, albums.size, albums.size),
+                    icon = if (playlists) Icons.AutoMirrored.Rounded.QueueMusic else Icons.Rounded.Album,
+                    title = if (playlists) stringResource(R.string.playlists) + " · ${albums.size}"
+                        else pluralStringResource(R.plurals.album_count, albums.size, albums.size),
                     modifier = Modifier.padding(horizontal = 0.dp, vertical = 10.dp),
                 )
             }
             if (albums.isEmpty()) {
                 item(span = { GridItemSpan(maxLineSpan) }) {
                     MessageState(
-                        message = stringResource(R.string.no_local_albums),
+                        message = stringResource(if (playlists) R.string.no_downloaded_playlists else R.string.no_local_albums),
                     )
                 }
             }
@@ -976,14 +899,15 @@ private fun AlbumsTab(
         ) {
             item {
                 SectionHeader(
-                    icon = Icons.Rounded.Album,
-                    title = pluralStringResource(R.plurals.album_count, albums.size, albums.size),
+                    icon = if (playlists) Icons.AutoMirrored.Rounded.QueueMusic else Icons.Rounded.Album,
+                    title = if (playlists) stringResource(R.string.playlists) + " · ${albums.size}"
+                        else pluralStringResource(R.plurals.album_count, albums.size, albums.size),
                 )
             }
             if (albums.isEmpty()) {
                 item {
                     MessageState(
-                        message = stringResource(R.string.no_local_albums),
+                        message = stringResource(if (playlists) R.string.no_downloaded_playlists else R.string.no_local_albums),
                     )
                 }
             }
@@ -1133,7 +1057,7 @@ private fun AlbumRow(
             )
         }
         Icon(
-            imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.PlayArrow,
+            imageVector = if (selected) Icons.Rounded.CheckCircle else Icons.Rounded.FolderOpen,
             contentDescription = if (selected) stringResource(R.string.selected) else null,
             tint = if (selected) MaterialTheme.colorScheme.primary else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.size(20.dp),

@@ -26,13 +26,16 @@ jobs:
     - name: Grant execute permission for gradlew
       run: chmod +x gradlew
 
-    - name: Test audio version selection
+    - name: Test playback and downloads
       run: >-
         ./gradlew testDevDebugUnitTest
         --tests "com.music.bitchord.AudioVersion*"
         --tests "com.music.bitchord.OfficialAudioMatcherTest"
         --tests "com.music.bitchord.SearchPagingTest"
         --tests "com.music.bitchord.SourcesTest"
+        --tests "com.music.bitchord.DownloadFoldersTest"
+        --tests "com.music.bitchord.DownloadStoreTest"
+        --tests "com.music.bitchord.MediaTaggerTest"
 
     - name: Build Dev Debug APK
       run: ./gradlew assembleDevDebug

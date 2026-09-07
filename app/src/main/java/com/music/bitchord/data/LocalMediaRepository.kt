@@ -88,8 +88,8 @@ object LocalMediaRepository {
                     MediaStore.Audio.Media.DATE_ADDED,
                     MediaStore.Audio.Media.DATE_MODIFIED,
                 )
-                val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?"
-                val selectionArgs = arrayOf("%${DownloadStore.FOLDER}%")
+                val selection = "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ? AND ${MediaStore.MediaColumns.IS_PENDING} = 0"
+                val selectionArgs = arrayOf("${android.os.Environment.DIRECTORY_MUSIC}/${DownloadStore.FOLDER}/%")
 
                 context.contentResolver.query(
                     MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
@@ -135,7 +135,7 @@ object LocalMediaRepository {
                     DownloadStore.FOLDER,
                 )
                 if (folder.exists() && folder.isDirectory) {
-                    folder.listFiles()?.forEach { file ->
+                    folder.walkTopDown().maxDepth(4).forEach { file ->
                         if (file.isFile && isAudioFileName(file.name)) {
                             val uriStr = Uri.fromFile(file).toString()
                             if (uriStr !in knownUris) {

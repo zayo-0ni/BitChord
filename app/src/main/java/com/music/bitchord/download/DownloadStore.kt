@@ -78,7 +78,8 @@ object DownloadStore {
     // ---- Naming -------------------------------------------------------------
 
     /**
-     * What the file is called: `Artist - Title.ext`.
+     * What the file is called: `Artist - Title [identity].ext`.
+     * The short identity keeps different recordings with identical titles separate.
      *
      * Artist first because a Music folder is sorted by name and nothing
      * else — no tags to group by — so leading with the artist is the only thing
@@ -92,7 +93,7 @@ object DownloadStore {
             title.isEmpty() -> artist
             else -> "$artist - $title"
         }.ifEmpty { song.videoId }
-        return "${stem.take(MAX_STEM_CHARS).trimEnd()}.$extension"
+        return "${DownloadFolders.component(stem)} [${DownloadFolders.key(song.videoId)}].$extension"
     }
 
     /**
@@ -107,9 +108,6 @@ object DownloadStore {
 
     private val ILLEGAL = Regex("""[\\/:*?"<>|\x00-\x1F]""")
     private val WHITESPACE = Regex("""\s+""")
-
-    /** Long enough for anything real, short of the 255-byte filename ceiling. */
-    private const val MAX_STEM_CHARS = 120
 
     /** What a file of some codec is called and what the store is told it is. */
     class Storable(val extension: String, val mimeType: String)
@@ -148,23 +146,23 @@ object DownloadStore {
      * taps download twice gets two copies rather than being told they already
      * have one.
      */
-    fun existing(context: Context, name: String): Uri? =
+    fun existing(context: Context, name: String, folder: String = "Songs"): Uri? =
         if (!AppSettings.exportDownloads.value) {
-            privateFile(context, name).takeIf { it.exists() }?.let(Uri::fromFile)
+            privateFile(context, name, folder).takeIf { it.exists() }?.let(Uri::fromFile)
         } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
-            mediaStoreEntry(context, name)
+            mediaStoreEntry(context, name, folder)
         } else {
-            legacyFile(name).takeIf { it.exists() }?.let(Uri::fromFile)
+            legacyFile(name, folder).takeIf { it.exists() }?.let(Uri::fromFile)
         }
 
     @RequiresApi(Build.VERSION_CODES.Q)
-    private fun mediaStoreEntry(context: Context, name: String): Uri? = runCatching {
+    private fun mediaStoreEntry(context: Context, name: String, folder: String): Uri? = runCatching {
         context.contentResolver.query(
             MediaStore.Audio.Media.EXTERNAL_CONTENT_URI,
             arrayOf(MediaStore.MediaColumns._ID),
             "${MediaStore.MediaColumns.DISPLAY_NAME} = ? AND " +
-                "${MediaStore.MediaColumns.RELATIVE_PATH} LIKE ?",
-            arrayOf(name, "%$FOLDER%"),
+                "${MediaStore.MediaColumns.RELATIVE_PATH} = ? AND ${MediaStore.MediaColumns.IS_PENDING} = 0",
+            arrayOf(name, "$relativePath/$folder/"),
             null,
         )?.use { cursor ->
             if (!cursor.moveToFirst()) return@use null
@@ -263,9 +261,9 @@ object DownloadStore {
      *   made — a failure worth surfacing, since every one of them means the
      *   download cannot start rather than that it might not finish.
      */
-    fun begin(context: Context, name: String, mimeType: String): Pending {
+    fun begin(context: Context, name: String, mimeType: String, folder: String = "Songs"): Pending {
         if (!AppSettings.exportDownloads.value) {
-            val target = privateFile(context, name)
+            val target = privateFile(context, name, folder)
             val folder = target.parentFile ?: error("No download folder")
             if (!folder.exists() && !folder.mkdirs()) error("Could not create ${folder.path}")
             val part = File(folder, ".$name.part")
@@ -276,7 +274,7 @@ object DownloadStore {
             val values = ContentValues().apply {
                 put(MediaStore.MediaColumns.DISPLAY_NAME, name)
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
-                put(MediaStore.MediaColumns.RELATIVE_PATH, relativePath)
+                put(MediaStore.MediaColumns.RELATIVE_PATH, "$relativePath/$folder/")
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
             }
             // A MIME type the audio collection doesn't recognise is not a null
@@ -295,20 +293,20 @@ object DownloadStore {
             return Pending(context, uri, name, part = null, target = null)
         }
 
-        val target = legacyFile(name)
-        val folder = target.parentFile ?: error("No Music folder on this device")
-        if (!folder.exists() && !folder.mkdirs()) error("Could not create ${folder.path}")
-        val part = File(folder, "$name.part")
+        val target = legacyFile(name, folder)
+        val directory = target.parentFile ?: error("No Music folder on this device")
+        if (!directory.exists() && !directory.mkdirs()) error("Could not create ${directory.path}")
+        val part = File(directory, "$name.part")
         part.delete()
         return Pending(context, Uri.fromFile(target), name, part = part, target = target)
     }
 
     @Suppress("DEPRECATION")
-    private fun legacyFile(name: String) = File(
-        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), FOLDER),
+    private fun legacyFile(name: String, folder: String) = File(
+        File(Environment.getExternalStoragePublicDirectory(Environment.DIRECTORY_MUSIC), "$FOLDER/$folder"),
         name,
     )
 
-    private fun privateFile(context: Context, name: String) =
-        File(File(context.filesDir, "downloads"), name)
+    private fun privateFile(context: Context, name: String, folder: String) =
+        File(File(context.filesDir, "downloads/$folder"), name)
 }

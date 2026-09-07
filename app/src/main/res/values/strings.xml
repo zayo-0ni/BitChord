@@ -655,7 +655,7 @@
         <item quantity="one">%1$d month of listening</item>
         <item quantity="other">%1$d months of listening</item>
     </plurals>
-    <string name="no_local_albums">Nothing here belongs to an album or playlist yet. Download a complete album or playlist and it will appear here.</string>
+    <string name="no_local_albums">No downloaded albums here yet. Download an album to browse its songs in one folder.</string>
     <string name="play_your_replay">Play your Replay</string>
     <string name="counted_on_device_with_bitchord">Counted on this device with BitChord</string>
     <string name="this_month">This month</string>
@@ -706,4 +706,5 @@
     <string name="use_this_profile">Use this profile</string>
     <string name="switch_profile_hint">Switch using the avatar, then use this profile.</string>
     <string name="profile_unavailable">No signed-in profile is available on this page yet.</string>
+    <string name="no_downloaded_playlists">No downloaded playlists yet. Download a playlist to browse its songs in one folder.</string>
 </resources>
