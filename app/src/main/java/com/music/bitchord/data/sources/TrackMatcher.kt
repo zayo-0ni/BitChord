@@ -579,6 +579,7 @@ object TrackMatcher {
                 .filter { it.length > 1 }
         }
         .filter { it.isNotEmpty() }
+        .filterNot { it == listOf("unknown", "artist") || it == listOf("unknown") || it == listOf("various", "artists") }
         .toSet()
 
     private fun sameArtist(a: List<String>, b: List<String>) = runOf(a, b) || runOf(b, a)

@@ -37,7 +37,9 @@ class OfficialAudioMatcherTest {
         assertEquals(audio("1989"), match(audio("1989"), target("Artist - 1989")))
     }
     @Test fun `unknown artist cannot establish an official pairing`() {
-        assertNull(TrackMatcher.bestOfficialAudioForVideo(listOf(audio("Track", "")), target("Track", "")))
+        for (artist in listOf("", "Unknown artist", "Unknown", "Various Artists")) {
+            assertNull(TrackMatcher.bestOfficialAudioForVideo(listOf(audio("Track", artist)), target("Track", artist)))
+        }
     }
     @Test fun `another video is never accepted as the audio release`() {
         assertNull(match(audio("Track").copy(isVideo = true), target("Track")))
