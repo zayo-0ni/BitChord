@@ -538,7 +538,7 @@ object Downloads {
             albumName = album,
             albumId = fetched.albumId ?: asked.albumId,
             artistId = fetched.artistId ?: asked.artistId,
-            explicit = fetched.explicit,
+            explicit = fetched.isExplicit,
             uri = uri.toString(),
             downloadFormat = downloadFormat,
         )
@@ -551,7 +551,7 @@ object Downloads {
             albumName = album,
             albumId = fetched.albumId ?: asked.albumId,
             artistId = fetched.artistId ?: asked.artistId,
-            explicit = fetched.explicit,
+            explicit = fetched.isExplicit,
             uri = uri.toString(),
             downloadFormat = downloadFormat,
         )
@@ -610,7 +610,7 @@ object Downloads {
                             albumName = meta.albumName,
                             albumId = meta.albumId,
                             artistId = meta.artistId,
-                            explicit = meta.explicit,
+                            isExplicit = meta.explicit,
                             localUri = meta.uri,
                             downloadFormat = meta.downloadFormat,
                         )
