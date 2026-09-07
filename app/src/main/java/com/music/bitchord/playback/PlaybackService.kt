@@ -603,6 +603,9 @@ class PlaybackService : MediaLibraryService() {
             loadLyricsForCurrentTrack()
             if (exoPlayer.isPlaying) startLyricsTicker()
             mediaSession?.setCustomLayout(notificationButtons())
+            // Urgent: the entry that just became audible outranks whatever the
+            // running pass is working on further down the queue.
+            AutoAudioVersion.sweep(exoPlayer, scope, urgent = true)
         }
 
         /**
@@ -821,6 +824,12 @@ class PlaybackService : MediaLibraryService() {
 
     override fun onCreate() {
         super.onCreate()
+
+        // An audio-version conversion of the playing entry is an in-place
+        // replace, which reaches onMediaItemTransition looking exactly like the
+        // queue moving on. Route it through the same guard the quality swap
+        // uses, keyed on the id that is arriving rather than the one leaving.
+        AutoAudioVersion.onCurrentSwap = { incoming -> swappingMediaId = incoming }
 
         if (com.music.bitchord.data.innertube.Innertube.cookie == null) {
             com.music.bitchord.data.innertube.Innertube.cookie = com.music.bitchord.auth.AuthStore(this).cookie

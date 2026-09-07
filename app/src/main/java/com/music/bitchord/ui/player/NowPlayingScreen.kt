@@ -1825,6 +1825,11 @@ fun NowPlayingScreen(
                 // frosted, pill-shaped control is the one explicit opt-in to a
                 // catalogue match; after a successful swap it becomes Revert
                 // so a bad match is one tap away from the original upload.
+                //
+                // Kept on screen even though [AutoAudioVersion] now does the
+                // swap unasked. Automatic matching is strict but not infallible,
+                // and this is the only way back from a match that got it wrong;
+                // hiding it would make a rebuild the price of one bad guess.
                 if ((song.isVideo || isAudioVersion) && !lyricsOpen && p < 0.5f) {
                     VideoAudioVersionButton(
                         audioVersion = isAudioVersion,
