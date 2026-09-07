@@ -38,3 +38,8 @@ keystore.properties
 .shots/
 .tmp_verify/
 .debug/
+
+# ...except the shared *debug* key, which is deliberately not a secret: it is
+# what lets every CI build install over the last one. Base64 so the exception
+# is to a named file rather than to the pattern above.
+!app/debug.keystore.b64

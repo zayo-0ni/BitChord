@@ -1,4 +1,6 @@
 import java.util.Properties
+import java.util.Base64
+import java.io.File
 import java.io.FileInputStream
 
 plugins {
@@ -86,7 +88,42 @@ android {
         }
     }
 
+    /**
+     * A debug key that is the same on every machine.
+     *
+     * Android's own debug keystore is generated per machine, and a CI runner is
+     * a new machine every time — so two builds of the same branch come out
+     * signed by two different keys, and installing the second over the first is
+     * refused as a different app ("App not installed"). Every build then costs
+     * an uninstall, which also throws away the dev build's settings and queue.
+     *
+     * Kept as base64 text rather than the binary: `*.keystore` is gitignored on
+     * purpose, and the exception here should be visibly the debug key rather
+     * than a loosened rule that a release key could later slip through. It is
+     * not a secret in any case — a debug key signs nothing anyone trusts, which
+     * is exactly why it can sit in the repository at all.
+     */
+    val debugKeystore: File? = rootProject.file("app/debug.keystore.b64")
+        .takeIf { it.exists() }
+        ?.let { encoded ->
+            val decoded = File(rootProject.file("build"), "debug.keystore")
+            if (!decoded.exists()) {
+                decoded.parentFile.mkdirs()
+                decoded.writeBytes(Base64.getMimeDecoder().decode(encoded.readText()))
+            }
+            decoded
+        }
+
     signingConfigs {
+        debugKeystore?.let { key ->
+            getByName("debug") {
+                storeFile = key
+                // The passwords Android's own debug keystore has always used.
+                storePassword = "android"
+                keyAlias = "androiddebugkey"
+                keyPassword = "android"
+            }
+        }
         // Both halves have to be there, not just the properties file: it *names*
         // the keystore rather than containing it, and both are gitignored
         // separately, so a checkout can easily end up with the one and not the
