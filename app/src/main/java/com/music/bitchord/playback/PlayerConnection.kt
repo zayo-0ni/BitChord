@@ -257,7 +257,34 @@ fun MediaItem.toSong() = Song(
     radioName = mediaMetadata.extras?.getString(EXTRA_RADIO_NAME),
     localUri = mediaMetadata.extras?.getString(EXTRA_LOCAL_URI),
     localPath = mediaMetadata.extras?.getString(EXTRA_LOCAL_PATH),
+    originalVideo = mediaMetadata.extras?.getBundle(EXTRA_ORIGINAL_VIDEO)?.toOriginalVideo(),
 )
+
+private fun Song.originalVideoBundle(): Bundle = bundleOf(
+    "id" to videoId, "title" to title, "artist" to artist, "art" to thumbnailUrl,
+    EXTRA_DURATION to durationText, EXTRA_ARTIST_ID to artistId,
+    EXTRA_ALBUM_ID to albumId, "album" to albumName,
+    EXTRA_SET_VIDEO_ID to setVideoId, EXTRA_FROM_AUTOPLAY to fromAutoplay,
+    EXTRA_RADIO_NAME to radioName,
+).apply { isExplicit?.let { putBoolean(EXTRA_EXPLICIT, it) } }
+
+private fun Bundle.toOriginalVideo(): Song? = getString("id")?.let { id ->
+    Song(
+        videoId = id,
+        title = getString("title").orEmpty(),
+        artist = getString("artist").orEmpty(),
+        thumbnailUrl = getString("art"),
+        durationText = getString(EXTRA_DURATION),
+        artistId = getString(EXTRA_ARTIST_ID),
+        albumId = getString(EXTRA_ALBUM_ID),
+        albumName = getString("album"),
+        setVideoId = getString(EXTRA_SET_VIDEO_ID),
+        fromAutoplay = getBoolean(EXTRA_FROM_AUTOPLAY),
+        radioName = getString(EXTRA_RADIO_NAME),
+        isExplicit = takeIf { containsKey(EXTRA_EXPLICIT) }?.getBoolean(EXTRA_EXPLICIT),
+        isVideo = true,
+    )
+}
 
 /** @see Song.fromAutoplay */
 val MediaItem.fromAutoplay: Boolean
@@ -305,6 +332,7 @@ private const val EXTRA_LOCAL_PATH = "bitchord.localPath"
  */
 private const val EXTRA_DURATION = "bitchord.durationText"
 private const val EXTRA_EXPLICIT = "bitchord.explicit"
+private const val EXTRA_ORIGINAL_VIDEO = "bitchord.originalVideo"
 private const val EXTRA_IS_VIDEO = "bitchord.isVideo"
 private const val EXTRA_VIDEO_ORIGIN = "bitchord.isVideoOrigin"
 
@@ -483,7 +511,7 @@ fun Song.toMediaItem(): MediaItem {
             .apply {
                 if (fromAutoplay || offlineUri != null || durationText != null ||
                     artistId != null || albumId != null || setVideoId != null ||
-                    isExplicit != null || isVideo || isVideoOrigin || radioName != null
+                    isExplicit != null || isVideo || isVideoOrigin || radioName != null || originalVideo != null
                 ) {
                     setExtras(
                         bundleOf(
@@ -495,10 +523,10 @@ fun Song.toMediaItem(): MediaItem {
                             EXTRA_ARTIST_ID to artistId,
                             EXTRA_ALBUM_ID to albumId,
                             EXTRA_SET_VIDEO_ID to setVideoId,
-                            EXTRA_EXPLICIT to isExplicit,
                             EXTRA_IS_VIDEO to isVideo,
                             EXTRA_VIDEO_ORIGIN to isVideoOrigin,
-                        ),
+                            EXTRA_ORIGINAL_VIDEO to originalVideo?.originalVideoBundle(),
+                        ).apply { isExplicit?.let { putBoolean(EXTRA_EXPLICIT, it) } },
                     )
                 }
             }

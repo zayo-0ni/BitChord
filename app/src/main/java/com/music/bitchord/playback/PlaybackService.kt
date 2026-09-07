@@ -4210,6 +4210,8 @@ class PlaybackService : MediaLibraryService() {
 
 
     override fun onDestroy() {
+        AutoAudioVersion.reset()
+        AutoAudioVersion.onCurrentSwap = null
         audioManager?.unregisterAudioDeviceCallback(outputDeviceCallback)
         player?.let(::savePlaybackState)
         // And to leave the widgets showing a play button. Nothing else reports a

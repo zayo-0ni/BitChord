@@ -303,75 +303,16 @@ object YtMusicRepository {
             InnertubeParser.parseSearchSuggestions(Innertube.searchSuggestions(input))
         }
 
-    /**
-     * The catalogue (audio-only) release of a music-video upload, found the
-     * same way the "Switch to audio" toggle in the real app would land on
-     * it: searching the title and artist and taking the closest song match.
-     * Called before a video-tagged [Song] ever reaches the queue, so
-     * playback, the mini player/notification, and YouTube's own history all
-     * see the audio track — never the video upload's title, art or id.
-     *
-     * Matched through [TrackMatcher] rather than a bare title compare, for
-     * the same reason [SourceResolver][com.music.bitchord.data.sources.SourceResolver]
-     * does: a query for a niche title can come back with nothing that is
-     * really the recording, and taking the first row regardless was landing
-     * on a same-language, wrong-song hit — a Telugu folk video resolving to
-     * an unrelated devotional track was reported from exactly this path.
-     * [TrackMatcher.best] returning null is a normal answer, not a failure to
-     * work around.
-     *
-     * Returns [song] unchanged when it isn't a video, or when nothing better
-     * turns up — playing the video's own audio track beats guessing at a
-     * substitute. This is deliberately an explicit action from the player,
-     * never part of normal queueing or playback.
-     *
-     * [search] already drops video rows from its results (see
-     * [InnertubeParser.parseSearch]), so every candidate here is audio-only
-     * without a second check.
-     */
-    suspend fun resolveAudio(song: Song): Song {
-        if (!song.isVideo) return song
-        // Written to [TrackLog], not just logcat: which words went to the
-        // search box is the whole story of a switch that found nothing, and
-        // until it was recorded per track, a Copy Log from a failing song
-        // showed the failure and none of its cause.
-        val targets = TrackMatcher.aliases(TrackMatcher.targetOf(song))
-        TrackLog.d(AUDIO_TAG, "resolving '${song.title}' by '${song.artist}'", song.videoId)
-        for (target in targets) {
-            for (query in TrackMatcher.queries(target)) {
-                val candidates = search(query, SearchFilter.SONGS)
-                    .getOrNull()
-                    ?.filterIsInstance<SearchResult.Track>()
-                    ?.map { it.song }
-                    .orEmpty()
-                TrackLog.d(
-                    AUDIO_TAG,
-                    "  q=\"$query\" -> ${candidates.size} songs" +
-                        candidates.take(3).joinToString("") { " | '${it.title}' by '${it.artist}'" },
-                    song.videoId,
-                )
-                TrackMatcher.best(candidates, target)?.let { match ->
-                    TrackLog.d(AUDIO_TAG, "  matched '${match.title}' by '${match.artist}'", song.videoId)
-                    return match
-                }
-                TrackMatcher.bestOfficialAudioForVideo(candidates, target)?.let { match ->
-                    TrackLog.d(
-                        AUDIO_TAG,
-                        "  matched (video drift) '${match.title}' by '${match.artist}'",
-                        song.videoId,
-                    )
-                    return match
-                }
-                if (candidates.isNotEmpty()) {
-                    TrackLog.d(AUDIO_TAG, "  none of those ${candidates.size} are this recording", song.videoId)
-                }
-            }
-        }
-        TrackLog.w(AUDIO_TAG, "no catalogue cut found after ${targets.size} reading(s)", song.videoId)
-        return song
-    }
+    private val audioResolver = AudioVersionResolver(
+        counterpart = { song ->
+            InnertubeParser.parseAudioCounterpart(Innertube.next(song.videoId), song.videoId)
+        },
+        search = { query -> search(query, SearchFilter.SONGS).getOrThrow() },
+        log = { message, videoId -> TrackLog.d("AudioSwitch", message, videoId) },
+    )
 
-    private const val AUDIO_TAG = "AudioSwitch"
+    /** The official audio and its artwork, or the unchanged video when no match exists. */
+    suspend fun resolveAudio(song: Song): Song = audioResolver.resolve(song)
 
     /** Signed-in profile for the settings header. Null when signed out. */
     suspend fun account(): Result<Account> = call("account") {

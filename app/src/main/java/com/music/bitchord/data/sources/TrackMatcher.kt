@@ -3,6 +3,7 @@ package com.music.bitchord.data.sources
 import com.music.bitchord.data.model.Song
 import kotlin.math.abs
 import java.util.Locale
+import java.text.Normalizer
 
 /**
  * Decides whether one catalogue's track is the same recording as another's,
@@ -51,6 +52,8 @@ object TrackMatcher {
         val isExplicit: Boolean? = null,
         /** Music-video timing includes visual intros/outros that catalogue audio omits. */
         val isVideo: Boolean = false,
+        /** Version labels elsewhere in a bilingual upload must survive each alias. */
+        val versionMarkers: Set<String> = emptySet(),
     )
 
     fun targetOf(song: Song) = Target(
@@ -79,115 +82,45 @@ object TrackMatcher {
      * and would otherwise score every result down.
      */
     fun queries(target: Target): List<String> {
-        val title = searchableTitle(target.title, target.artist)
+        val parts = parseTitle(target.title, target.artist)
+        val title = (parts.words + (parts.versions + target.versionMarkers)).joinToString(" ")
         if (title.isBlank()) return emptyList()
         val artist = primaryArtist(target.artist)
         if (artist.isBlank()) return listOf(title)
         return listOf("$title $artist", title)
     }
 
-    /**
-     * The same recording under each name its upload title gives it.
-     *
-     * A great many music-video uploads title themselves twice, once per script,
-     * with a pipe between:
-     *
-     *     Mahmoud El Turky - Ilaj 3youni (Official Video) 2026 | محمود التركي - علاج عيوني
-     *
-     * Read as one string that is neither name. [parseTitle] takes the head of
-     * the first separator it finds, hands it to [isArtistName], and gets back
-     * "no" — because the credit on the row is the *channel* ("AlNojomia"), not
-     * the artist printed in the title. So the head is kept as the title and
-     * everything after it is discarded as packaging, and the search that goes
-     * out is for `mahmoud el turky alnojomia`: the artist's name and the
-     * channel's, with the song's name thrown away. It finds nothing, which is
-     * the correct answer to the question that was actually asked.
-     *
-     * Each side of the pipe, though, is a well-formed `Artist - Title` on its
-     * own. So each becomes a target in its own right, with the head of its own
-     * dash as the credit — which is exactly the shape [parseTitle] already
-     * knows how to read. The catalogue lists this track in Arabic, so it is the
-     * Arabic segment that finds it.
-     *
-     * None of this is about Arabic, or about pipes. `The Weeknd - Blinding
-     * Lights (Official Video)` uploaded by `TheWeekndVEVO` fails in exactly the
-     * same place and for exactly the same reason — the channel is not the
-     * artist — and searches for `the weeknd theweekndvevo`. A title with no
-     * pipe is simply a single segment, and gets read the same way.
-     *
-     * This widens what is *asked*, never what is accepted: every candidate that
-     * comes back is still judged by [best] or [bestOfficialAudioForVideo]
-     * against the segment that found it, title and credit both. A search that
-     * cannot name the song cannot match it either, and that was the whole
-     * failure — not a bar set too high, a question asked about the wrong words.
-     */
+    /** Read both upload conventions without discarding the actual song title. */
     fun aliases(target: Target): List<Target> {
+        val base = target.copy(versionMarkers =
+            target.versionMarkers + parseTitle(target.title, target.artist).versions)
         val derived = mutableListOf<Target>()
         for (raw in target.title.split(PIPE).map { it.trim() }.filter { it.isNotBlank() }) {
             val segment = withoutReleaseYear(raw)
             val dash = DASH.find(segment)
-            val credit = dash?.let { segment.substring(0, it.range.first).trim() }.orEmpty()
-            val rest = dash?.let { segment.substring(it.range.last + 1).trim() }.orEmpty()
-            // Both halves have to be there for the segment to read as
-            // "Artist - Title": a leading or trailing dash is punctuation.
-            derived += if (credit.isNotBlank() && rest.isNotBlank()) {
-                target.copy(title = segment, artist = credit)
-            } else {
-                target.copy(title = segment)
+            val head = dash?.let { segment.substring(0, it.range.first).trim() }.orEmpty()
+            val tail = dash?.let { segment.substring(it.range.last + 1).trim() }.orEmpty()
+            when {
+                head.isBlank() || tail.isBlank() -> derived += base.copy(title = segment)
+                parseTitle(tail).words.all { it in NOISE_WORDS } -> derived += base.copy(title = segment)
+                isArtistName(head, target.artist) -> derived += base.copy(title = tail)
+                isArtistName(tail, target.artist) -> derived += base.copy(title = head)
+                else -> {
+                    // The uploader may be a label. Neither side's position is
+                    // evidence of identity; a candidate must match BOTH fields.
+                    derived += base.copy(title = tail, artist = head)
+                    derived += base.copy(title = head, artist = tail)
+                    derived += base.copy(title = segment)
+                }
             }
         }
-        // The reading that comes first is the one the extra round trip is spent
-        // on first, and on the hold-before-play path that is time the listener
-        // waits in silence. So the untouched target leads unless it is known to
-        // be the broken one.
-        val order = if (readsAsItsOwnCredit(target)) derived + target else listOf(target) + derived
-        return order.distinctBy { it.title to it.artist }
+        return (derived + base).distinctBy { parseTitle(it.title, it.artist).core to artistNames(it.artist) }
     }
 
-    /**
-     * Whether [parseTitle] has resolved this title down to the artist's name.
-     *
-     * The exact signature of the failure [aliases] exists for: the head of the
-     * title's own dash is not the credit on the row, so it is kept as the title
-     * and the song's name is discarded as packaging. When that has happened the
-     * untouched target is worth nothing — it asks a catalogue for an artist's
-     * name — and the segment readings go first instead.
-     */
-    private fun readsAsItsOwnCredit(target: Target): Boolean {
-        val dash = DASH.find(target.title) ?: return false
-        val head = target.title.substring(0, dash.range.first)
-        val headCore = head.lowercase(Locale.ROOT).split(WORD_SPLIT)
-            .map { it.replace(NON_ALNUM, "") }
-            .filter { it.isNotEmpty() }
-            .joinToString("")
-        return headCore.isNotEmpty() && parseTitle(target.title, target.artist).core == headCore
-    }
-
-    /**
-     * A segment without the release year an upload signs itself with.
-     *
-     * `... - Ilaj 3youni (Official Video) 2026` against a catalogue listing of
-     * `Ilaj 3youni`: same recording, and the identity comparison fails on a
-     * number that is the upload's date rather than any part of the song's name.
-     *
-     * Deliberately only here, and only at the end of a segment that has other
-     * words left. Titles legitimately are years — *1989*, *2112* — and the
-     * general [parseTitle] is what the source ladder matches whole streams on,
-     * where a wrong pairing costs the listener a different recording. This path
-     * has already narrowed to "the catalogue cut of this specific video", so
-     * the trailing-token rule can be applied where it is safe rather than
-     * everywhere it would sometimes help.
-     */
     private fun withoutReleaseYear(segment: String): String {
-        val words = segment.trim().split(WORD_SPLIT).filter { it.isNotEmpty() }
-        if (words.size < 2) return segment
-        val last = words.last()
-        val year = last.toIntOrNull()
-        return if (last.length == 4 && year != null && year in 1900..2099) {
-            words.dropLast(1).joinToString(" ")
-        } else {
-            segment
-        }
+        // A number following an explicit upload label is packaging. "Summer
+        // 2020" and "Artist - 1989" are titles and must keep their numbers.
+        return segment.replace(RELEASE_YEAR, "$1")
     }
 
     /** The title with the packaging taken off, version markers kept. */
@@ -196,7 +129,7 @@ object TrackMatcher {
 
     /** The first credited artist — who a catalogue is most likely to file the track under. */
     internal fun primaryArtist(artist: String): String =
-        artist.lowercase(Locale.ROOT).split(ARTIST_SEPARATORS).firstOrNull()?.trim().orEmpty()
+        normalise(artist).split(ARTIST_SEPARATORS).firstOrNull()?.trim().orEmpty()
 
     /** Whether both credits name at least one of the same artists. */
     internal fun sharesArtist(wanted: String, got: String): Boolean {
@@ -231,8 +164,8 @@ object TrackMatcher {
      * different contract: it asks YouTube Music's *Songs* shelf for the
      * official release of a known video. Here an exact recording title,
      * identical version markers and a shared artist are enough to establish
-     * that relationship; duration only ranks equivalent releases and never
-     * vetoes one.
+     * that relationship; a longer video is allowed, while an implausibly longer audio
+     * result is still rejected.
      *
      * This remains deliberately stricter than a search engine's first row.
      * A cover, remix or karaoke version still cannot cross the switch just
@@ -244,11 +177,19 @@ object TrackMatcher {
         return candidates
             .mapNotNull { candidate ->
                 val got = parseTitle(candidate.title, candidate.artist)
-                if (wanted.core != got.core || wanted.versions != got.versions) return@mapNotNull null
+                if (candidate.isVideo || !sharesArtist(target.artist, candidate.artist)) return@mapNotNull null
+                if (wanted.core != got.core || (wanted.versions + target.versionMarkers) != got.versions) return@mapNotNull null
+                if (explicitScore(target.isExplicit, candidate.isExplicit) == null) return@mapNotNull null
+                if (!featuresAccountedFor(got, candidate.artist, wanted)) return@mapNotNull null
                 if (!featuresAccountedFor(wanted, target.artist, got)) return@mapNotNull null
                 val artist = artistScore(target.artist, candidate.artist) ?: return@mapNotNull null
                 val duration = target.durationSec?.let { expected ->
-                    secondsOf(candidate.durationText)?.let { actual -> -abs(expected - actual) } ?: -120
+                    secondsOf(candidate.durationText)?.let { actual ->
+                        // Visual material can lengthen a video, not justify an
+                        // audio result that is an extended cut or an hour loop.
+                        if (actual > expected + DURATION_LIMIT_SEC) return@mapNotNull null
+                        -abs(expected - actual)
+                    } ?: -120
                 } ?: 0
                 candidate to (artist * 1_000 + duration)
             }
@@ -299,7 +240,7 @@ object TrackMatcher {
         // Direction matters both ways round: asking for the album cut must not
         // land on the live take, and asking for the live take must not land on
         // the album cut.
-        if (wanted.versions != got.versions) return null
+        if ((wanted.versions + target.versionMarkers) != got.versions) return null
         if (!featuresAccountedFor(wanted, target.artist, got)) return null
 
         val creditedArtist = artistScore(target.artist, candidate.artist)
@@ -442,10 +383,8 @@ object TrackMatcher {
         if (got.features.isEmpty()) return true
         val named = buildSet {
             addAll(wanted.features)
-            addAll(wanted.words)
-            addAll(wanted.context)
             addAll(
-                wantedArtist.lowercase(Locale.ROOT).split(WORD_SPLIT)
+                normalise(wantedArtist).split(WORD_SPLIT)
                     .map { it.replace(NON_ALNUM, "") }
                     .filter { it.isNotEmpty() },
             )
@@ -487,7 +426,7 @@ object TrackMatcher {
         val versions = sortedSetOf<String>()
         val context = mutableSetOf<String>()
         val features = mutableSetOf<String>()
-        var text = raw.lowercase(Locale.ROOT).replace("&", " and ")
+        var text = normalise(raw).replace("&", " and ")
 
         // Bracketed asides, innermost first: "(From "Satyamev Jayate")",
         // "[Official Audio]", "(Live at Wembley)".
@@ -590,9 +529,9 @@ object TrackMatcher {
     /** Whether [text] is nothing but (part of) [artist] — the "Artist - Title" upload shape. */
     private fun isArtistName(text: String, artist: String): Boolean {
         if (artist.isBlank()) return false
-        val words = text.split(WORD_SPLIT).map { it.replace(NON_ALNUM, "") }.filter { it.isNotEmpty() }
+        val words = normalise(text).split(WORD_SPLIT).map { it.replace(NON_ALNUM, "") }.filter { it.isNotEmpty() }
         if (words.isEmpty()) return false
-        val credited = artist.lowercase(Locale.ROOT).split(WORD_SPLIT)
+        val credited = normalise(artist).split(WORD_SPLIT)
             .map { it.replace(NON_ALNUM, "") }
             .filter { it.isNotEmpty() }
             .toSet()
@@ -632,8 +571,7 @@ object TrackMatcher {
      * "Atif Aslam, Tulsi Kumar". Single letters go — an initialled
      * "A. R. Rahman" and a plain "AR Rahman" are the same person.
      */
-    internal fun artistNames(value: String): Set<List<String>> = value
-        .lowercase(Locale.ROOT)
+    internal fun artistNames(value: String): Set<List<String>> = normalise(value)
         .split(ARTIST_SEPARATORS)
         .map { name ->
             name.split(WORD_SPLIT)
@@ -703,7 +641,7 @@ object TrackMatcher {
 
     /** Punctuation, spacing and a trailing edition label are catalogue formatting, not release identity. */
     private fun albumKey(value: String?): String? {
-        var text = value?.lowercase(Locale.ROOT)?.trim().orEmpty()
+        var text = value?.let(::normalise)?.trim().orEmpty()
         if (text.isEmpty()) return null
         repeat(BRACKET_PASSES) { text = BRACKETED.replace(text, " ") }
         val words = text.split(WORD_SPLIT)
@@ -780,29 +718,19 @@ object TrackMatcher {
      */
     private val FEATURE_MARKERS = setOf("feat", "ft", "featuring")
 
-    private val FEATURING = Regex("""\b(feat|ft|featuring|with)\b.*""")
+    private val FEATURING = Regex("""\b(feat|ft|featuring)\b.*""")
     private val WORD_SPLIT = Regex("""[\s.·]+""")
-    /**
-     * Everything that is not a letter or a digit, in any script.
-     *
-     * Was `[^a-z0-9]`, which does not mean "punctuation": it means every
-     * character outside the English alphabet, so an Arabic, Cyrillic, Hindi,
-     * Japanese or Korean title was erased down to an empty string. An empty
-     * core cannot equal anything, and [bestOfficialAudioForVideo] returns null
-     * on one outright — so for a catalogue that lists a track under its own
-     * script, every comparison in here was answering "not the same recording"
-     * about two spellings of the same recording, and no non-Latin track could
-     * ever be matched by anything that asks this class.
-     *
-     * [QueueBuilder][com.music.bitchord.playback.QueueBuilder] normalises with
-     * `\p{L}\p{N}` already, and the two have to agree: one deciding two entries
-     * are the same recording while the other cannot read either of their names
-     * is how a de-duplicated queue still plays a song twice.
-     *
-     * Combining marks are still dropped, which is the intent — Arabic
-     * harakat and Latin accents are spelling, not identity.
-     */
-    private val NON_ALNUM = Regex("""[^\p{L}\p{N}]""")
+    /** Preserve meaningful letters and vowel marks outside Arabic too. */
+    private fun normalise(value: String): String = Normalizer.normalize(value, Normalizer.Form.NFKC)
+        .lowercase(Locale.ROOT)
+        .replace(ARABIC_DECORATION, "")
+        .replace(ARABIC_ALEF, "ا")
+        .replace('ى', 'ي').replace('ی', 'ي').replace('ک', 'ك')
+
+    private val ARABIC_ALEF = Regex("[أإآٱ]")
+    private val ARABIC_DECORATION = Regex("[\u0640\u0610-\u061A\u064B-\u065F\u0670\u06D6-\u06ED]")
+    private val RELEASE_YEAR = Regex("""(?i)(\((?:official\s+)?(?:music\s+)?(?:video|audio)\)|\[(?:official\s+)?(?:video|audio)\])\s+(?:19|20)[0-9]{2}\s*$""")
+    private val NON_ALNUM = Regex("""[^\p{L}\p{N}\p{M}]""")
     private val ARTIST_SEPARATORS =
         Regex("""\s*(?:[,&/;·|]|\band\b|\bx\b|\bvs\.?\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b)\s*""")
 

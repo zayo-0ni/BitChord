@@ -628,7 +628,7 @@ object InnertubeParser {
             // The row type word is the clean signal when present ("All" tab);
             // otherwise a music-video upload gives itself away with widescreen
             // art where a catalogue track has square album cover art.
-            isVideo = rowType == "video" || thumbnails.isNotSquare(),
+            isVideo = isVideoRow(renderer, rowType == "video" || thumbnails.isNotSquare()),
             isExplicit = renderer.hasExplicitBadge(),
         )
     }
@@ -666,7 +666,7 @@ object InnertubeParser {
             artistId = credits.artistId,
             albumId = credits.albumId,
             albumName = credits.albumName,
-            isVideo = rowType == "video" || thumbnails.isNotSquare(),
+            isVideo = isVideoRow(renderer, rowType == "video" || thumbnails.isNotSquare()),
             isExplicit = renderer["subtitleBadges"].hasExplicitBadge(),
         )
     }
@@ -926,36 +926,97 @@ object InnertubeParser {
             )
         }.distinctBy { it.key }
 
-    /** Tracks of a watch queue (`next` response) — the AutoPlay radio mix. */
+    /** Type attached to this row's play endpoint, never an unrelated item in its menu. */
+    private fun musicVideoType(renderer: JsonObject): String? {
+        val titleRuns = renderer.a("flexColumns").orEmpty().firstOrNull()
+            .o("musicResponsiveListItemFlexColumnRenderer").o("text").a("runs").orEmpty()
+        val endpoints = listOf(
+            renderer.o("navigationEndpoint"),
+            renderer.o("onTap"),
+            renderer.o("overlay").o("musicItemThumbnailOverlayRenderer").o("content")
+                .o("musicPlayButtonRenderer").o("playNavigationEndpoint"),
+        ) + titleRuns.map { it.o("navigationEndpoint") }
+        return endpoints.firstNotNullOfOrNull {
+            it.o("watchEndpoint").o("watchEndpointMusicSupportedConfigs")
+                .o("watchEndpointMusicConfig").s("musicVideoType")
+        }
+    }
+
+    private fun isVideoRow(renderer: JsonObject, fallback: Boolean): Boolean =
+        when (musicVideoType(renderer)) {
+            "MUSIC_VIDEO_TYPE_ATV" -> false
+            "MUSIC_VIDEO_TYPE_OMV", "MUSIC_VIDEO_TYPE_UGC",
+            "MUSIC_VIDEO_TYPE_OFFICIAL_SOURCE_MUSIC" -> true
+            else -> fallback
+        }
+
+    private fun parseWatchSong(renderer: JsonObject): Song? {
+        val videoId = renderer.s("videoId") ?: return null
+        if (renderer["unplayableText"] != null) return null
+        val title = renderer.o("title").runs()
+        if (title.isBlank()) return null
+        val bylineRuns = renderer.o("longBylineText").a("runs").orEmpty()
+            .ifEmpty { renderer.o("shortBylineText").a("runs").orEmpty() }
+        val byline = bylineRuns.map { it.s("text").orEmpty() }
+        val artist = byline.takeWhile { !it.contains("•") }.joinToString("").trim()
+        val credits = creditsOf(bylineRuns)
+        val thumbnails = renderer.o("thumbnail").a("thumbnails")
+        return Song(
+            videoId = videoId,
+            title = title,
+            artist = credits.artistName?.takeIf { it.isNotBlank() } ?: artist,
+            thumbnailUrl = thumbnails.best(),
+            durationText = renderer.o("lengthText").runs().takeIf { it.isNotBlank() },
+            artistId = credits.artistId,
+            albumId = credits.albumId,
+            albumName = credits.albumName,
+            isVideo = isVideoRow(renderer,
+                thumbnails.isNotSquare() || byline.any { it.contains("views", ignoreCase = true) }),
+            isExplicit = renderer.hasExplicitBadge(),
+        )
+    }
+
+    /** Only an explicit pairing for this id proves that another queue row is its audio release. */
+    fun parseAudioCounterpart(root: JsonElement, videoId: String): Song? {
+        for (wrapper in collectRenderers(root, "playlistPanelVideoWrapperRenderer")) {
+            val primary = wrapper.o("primaryRenderer").o("playlistPanelVideoRenderer")
+            val counterparts = wrapper.a("counterpart").orEmpty().mapNotNull {
+                it.o("counterpartRenderer").o("playlistPanelVideoRenderer")
+            }
+            val rows = listOfNotNull(primary) + counterparts
+            if (rows.none { it.s("videoId") == videoId }) continue
+            rows.filter { it.s("videoId") != videoId }.forEach { row ->
+                val song = parseWatchSong(row) ?: return@forEach
+                // A square image alone is insufficient proof of official audio.
+                if (!song.isVideo && !song.thumbnailUrl.isNullOrBlank() &&
+                    (musicVideoType(row) == "MUSIC_VIDEO_TYPE_ATV" || song.albumId != null)
+                ) return song
+            }
+        }
+        return null
+    }
+
+    /** Counterparts are alternatives to a row, not extra songs for AutoPlay to enqueue. */
     fun parseWatchQueue(root: JsonElement): List<Song> {
         val out = LinkedHashMap<String, Song>()
-        collectRenderers(root, "playlistPanelVideoRenderer").forEach { renderer ->
-            val videoId = renderer.s("videoId") ?: return@forEach
-            val title = renderer.o("title").runs()
-            if (title.isBlank()) return@forEach
-            // The byline packs artist, views and likes into one run list; only
-            // the leading runs before the first bullet are the credit.
-            val bylineRuns = renderer.o("longBylineText").a("runs").orEmpty()
-            val byline = bylineRuns.map { it.s("text").orEmpty() }
-            val artist = byline.takeWhile { !it.contains("•") }.joinToString("").trim()
-            // Those same runs link out to the artist and album pages, which is
-            // how a track started from the queue knows where it came from.
-            val credits = creditsOf(bylineRuns)
-            out[videoId] = Song(
-                videoId = videoId,
-                title = title,
-                artist = artist,
-                thumbnailUrl = renderer.o("thumbnail").a("thumbnails").best(),
-                durationText = renderer.o("lengthText").runs().takeIf { it.isNotBlank() },
-                artistId = credits.artistId,
-                albumId = credits.albumId,
-                albumName = credits.albumName,
-                // A catalogue track is credited "Artist • Album • Year"; the
-                // matching music video is "Artist • 417M views • 2.4M likes".
-                isVideo = byline.any { it.contains("views", ignoreCase = true) },
-                isExplicit = renderer.hasExplicitBadge(),
-            )
+        fun visit(node: JsonElement) {
+            when (node) {
+                is JsonArray -> node.forEach(::visit)
+                is JsonObject -> {
+                    val wrapper = node.o("playlistPanelVideoWrapperRenderer")
+                    val row = if (wrapper != null) {
+                        wrapper.o("primaryRenderer").o("playlistPanelVideoRenderer")
+                    } else node.o("playlistPanelVideoRenderer")
+                    when {
+                        row != null -> parseWatchSong(row)?.let { out.putIfAbsent(it.videoId, it) }
+                        wrapper != null -> Unit
+                        else -> node.values.forEach(::visit)
+                    }
+                }
+                else -> Unit
+            }
         }
+        visit(root)
         return out.values.toList()
     }
 

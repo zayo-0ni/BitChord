@@ -70,6 +70,18 @@ data class Song(
     val sourceQuality: String? = null,
     /** Explicit-content state from the catalogue; null when that source does not say. */
     val isExplicit: Boolean? = null,
+    /** Original upload retained for Revert, including automatic conversions. */
+    val originalVideo: Song? = null,
+)
+
+/** Change the recording and art together while retaining the queue entry's identity. */
+fun Song.asAudioVersionOf(original: Song): Song = copy(
+    isVideo = false,
+    isVideoOrigin = true,
+    originalVideo = original.copy(originalVideo = null),
+    fromAutoplay = original.fromAutoplay,
+    radioName = original.radioName,
+    setVideoId = original.setVideoId,
 )
 
 /**

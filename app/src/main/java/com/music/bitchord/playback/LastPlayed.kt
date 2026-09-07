@@ -142,6 +142,10 @@ object LastPlayed {
         val album: String? = null,
         val explicit: Boolean? = null,
         val video: Boolean = false,
+        val videoOrigin: Boolean = video,
+        val original: StoredTrack? = null,
+        val radio: String? = null,
+        val playlistEntry: String? = null,
     ) {
         fun toSong() = Song(
             videoId = id,
@@ -152,6 +156,10 @@ object LastPlayed {
             albumName = album,
             isExplicit = explicit,
             isVideo = video,
+            isVideoOrigin = videoOrigin,
+            originalVideo = original?.toSong(),
+            radioName = radio,
+            setVideoId = playlistEntry,
             fromAutoplay = auto,
             localUri = local,
             localPath = path,
@@ -170,6 +178,10 @@ object LastPlayed {
                 album = song.albumName,
                 explicit = song.isExplicit,
                 video = song.isVideo,
+                videoOrigin = song.isVideoOrigin,
+                original = song.originalVideo?.let { from(it.copy(originalVideo = null)) },
+                radio = song.radioName,
+                playlistEntry = song.setVideoId,
             )
         }
     }

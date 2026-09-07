@@ -112,6 +112,7 @@ import com.music.bitchord.data.model.SearchFilter
 import com.music.bitchord.data.model.SearchResult
 import com.music.bitchord.data.model.ShelfItem
 import com.music.bitchord.data.model.Song
+import com.music.bitchord.data.model.asAudioVersionOf
 import com.music.bitchord.data.model.UiState
 import com.music.bitchord.data.model.durationMillis
 import com.music.bitchord.data.scrobbling.LastFM
@@ -130,6 +131,7 @@ import com.music.bitchord.ui.screens.SourcesScreen
 import com.music.bitchord.ui.screens.SpotifyCanvasAuthScreen
 import com.music.bitchord.playback.LinkRequest
 import com.music.bitchord.playback.MusicLink
+import com.music.bitchord.playback.AutoAudioVersion
 import com.music.bitchord.playback.OriginalVersion
 import com.music.bitchord.playback.PlayerDeepLink
 import com.music.bitchord.playback.QueueBuilder
@@ -601,13 +603,8 @@ private fun BitChordApp(
     val controller = rememberMediaController()
     val player = rememberPlayerState(controller)
     val shuffleEnabled by QueueShuffle.enabled.collectAsStateWithLifecycle()
-    // A conversion is deliberately scoped to the current listening session.
-    // Keeping the complete original row here lets Revert restore the exact
-    // video upload, including its title and playlist identity, rather than
-    // trying to reconstruct it from the catalogue match.
-    var convertedFromVideo by remember { mutableStateOf<Song?>(null) }
-    var convertedAudioId by remember { mutableStateOf<String?>(null) }
-    var switchingAudioVersion by remember { mutableStateOf(false) }
+    // The original is carried in queue metadata for both manual and automatic swaps.
+    var switchingAudioId by remember { mutableStateOf<String?>(null) }
 
     // Lyrics follow whatever is playing; duration lands a beat after the track.
     // Keyed on the lyric settings too, so turning a source on or off applies to
@@ -735,11 +732,6 @@ private fun BitChordApp(
     }
     LaunchedEffect(player.song?.videoId) {
         if (activeRadioSeed?.first != player.song?.videoId) activeRadioSeed = null
-        if (player.song?.videoId != convertedAudioId) {
-            convertedFromVideo = null
-            convertedAudioId = null
-            switchingAudioVersion = false
-        }
     }
 
     /**
@@ -1405,48 +1397,36 @@ private fun BitChordApp(
             isLoading = player.isLoading,
             positionMs = player.position.positionMs,
             durationMs = player.durationMs,
-            isAudioVersion = convertedAudioId == song.videoId,
-            audioVersionSwitching = switchingAudioVersion,
+            isAudioVersion = song.originalVideo != null,
+            audioVersionSwitching = switchingAudioId == song.videoId,
             qualityUpgraded = player.isQualityUpgraded,
             onToggleAudioVersion = audioVersion@{
                 val c = controller ?: return@audioVersion
                 val index = c.currentMediaItemIndex
                 if (index !in 0 until c.mediaItemCount) return@audioVersion
-                val original = convertedFromVideo
-                if (original != null && convertedAudioId == song.videoId) {
-                    val position = c.currentPosition
-                    val wasPlaying = c.isPlaying
-                    c.replaceMediaItem(index, original.toMediaItem())
-                    c.seekTo(index, position)
-                    if (wasPlaying) c.play()
-                    convertedFromVideo = null
-                    convertedAudioId = null
+                if (c.currentMediaItem?.mediaId != song.videoId) return@audioVersion
+                val original = song.originalVideo
+                if (original != null) {
+                    OriginalVersion.pin(original.videoId)
+                    AutoAudioVersion.replace(c, index, original)
                     return@audioVersion
                 }
-                if (!song.isVideo || switchingAudioVersion) return@audioVersion
+                if (!song.isVideo || switchingAudioId != null) return@audioVersion
                 scope.launch {
-                    switchingAudioVersion = true
-                    TrackLog.d("Player", "audio switch requested for '${song.title}'", song.videoId)
-                    val audio = runCatching { YtMusicRepository.resolveAudio(song) }.getOrNull()
-                    switchingAudioVersion = false
-                    // A match can be absent or the listener may have skipped
-                    // while it was being found. Neither should change a queue.
-                    if (audio == null || audio.videoId == song.videoId) {
-                        TrackLog.w("Player", "audio switch found no distinct official song", song.videoId)
-                        return@launch
+                    switchingAudioId = song.videoId
+                    try {
+                        val audio = YtMusicRepository.resolveAudio(song)
+                        if (audio.videoId == song.videoId || audio.isVideo) return@launch
+                        if (c.currentMediaItemIndex != index || c.currentMediaItem?.mediaId != song.videoId) return@launch
+                        OriginalVersion.unpin(song.videoId)
+                        AutoAudioVersion.replace(c, index, audio.asAudioVersionOf(song))
+                    } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                        throw cancelled
+                    } catch (error: Exception) {
+                        TrackLog.w("Player", "Audio lookup failed; keeping video: ${error.javaClass.simpleName}", song.videoId)
+                    } finally {
+                        if (switchingAudioId == song.videoId) switchingAudioId = null
                     }
-                    if (c.currentMediaItemIndex != index || c.currentMediaItem?.mediaId != song.videoId) {
-                        TrackLog.d("Player", "audio switch discarded; listener changed track", song.videoId)
-                        return@launch
-                    }
-                    val position = c.currentPosition
-                    val wasPlaying = c.isPlaying
-                    convertedFromVideo = song
-                    convertedAudioId = audio.videoId
-                    TrackLog.d("Player", "audio switch applying '${audio.title}' (${audio.videoId})", song.videoId)
-                    c.replaceMediaItem(index, audio.copy(isVideoOrigin = true).toMediaItem())
-                    c.seekTo(index, position)
-                    if (wasPlaying) c.play()
                 }
             },
             onPlayPause = {

@@ -47,7 +47,7 @@ android {
         minSdk = 26
         targetSdk = 36
         versionCode = 14
-        versionName = "1.5.2-auto6"
+        versionName = "1.5.2-auto7"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
 
@@ -107,9 +107,10 @@ android {
         .takeIf { it.exists() }
         ?.let { encoded ->
             val decoded = File(rootProject.file("build"), "debug.keystore")
-            if (!decoded.exists()) {
+            val bytes = Base64.getMimeDecoder().decode(encoded.readText())
+            if (!decoded.exists() || !decoded.readBytes().contentEquals(bytes)) {
                 decoded.parentFile.mkdirs()
-                decoded.writeBytes(Base64.getMimeDecoder().decode(encoded.readText()))
+                decoded.writeBytes(bytes)
             }
             decoded
         }
