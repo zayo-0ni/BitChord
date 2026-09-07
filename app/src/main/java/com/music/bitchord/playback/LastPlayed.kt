@@ -147,7 +147,7 @@ object LastPlayed {
         val radio: String? = null,
         val playlistEntry: String? = null,
     ) {
-        fun toSong() = Song(
+        fun toSong(): Song = Song(
             videoId = id,
             title = title,
             artist = artist,
@@ -166,7 +166,7 @@ object LastPlayed {
         )
 
         companion object {
-            fun from(song: Song) = StoredTrack(
+            fun from(song: Song): StoredTrack = StoredTrack(
                 id = song.videoId,
                 title = song.title,
                 artist = song.artist,
