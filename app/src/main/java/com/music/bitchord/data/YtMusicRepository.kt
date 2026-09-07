@@ -331,23 +331,28 @@ object YtMusicRepository {
      */
     suspend fun resolveAudio(song: Song): Song {
         if (!song.isVideo) return song
-        val target = TrackMatcher.targetOf(song)
-        for (query in TrackMatcher.queries(target)) {
-            val candidates = search(query, SearchFilter.SONGS)
-                .getOrNull()
-                ?.filterIsInstance<SearchResult.Track>()
-                ?.map { it.song }
-                .orEmpty()
-            TrackMatcher.best(candidates, target)?.let { match ->
-                Log.d(TAG, "audio switch: '${song.title}' -> '${match.title}' ($query)")
-                return match
-            }
-            // Music-video timing is visual timing, not the audio release's
-            // timing. The manual switch may therefore use the exact official
-            // song/artist match even when the video has a long intro or outro.
-            TrackMatcher.bestOfficialAudioForVideo(candidates, target)?.let { match ->
-                Log.d(TAG, "audio switch: accepted video/runtime drift '${song.title}' -> '${match.title}' ($query)")
-                return match
+        // A bilingual upload names the track twice, once per script, and only
+        // one of those names is the one the catalogue files it under — see
+        // [TrackMatcher.aliases]. Each naming is asked about separately, and
+        // each candidate is judged against the naming that found it.
+        for (target in TrackMatcher.aliases(TrackMatcher.targetOf(song))) {
+            for (query in TrackMatcher.queries(target)) {
+                val candidates = search(query, SearchFilter.SONGS)
+                    .getOrNull()
+                    ?.filterIsInstance<SearchResult.Track>()
+                    ?.map { it.song }
+                    .orEmpty()
+                TrackMatcher.best(candidates, target)?.let { match ->
+                    Log.d(TAG, "audio switch: '${song.title}' -> '${match.title}' ($query)")
+                    return match
+                }
+                // Music-video timing is visual timing, not the audio release's
+                // timing. The manual switch may therefore use the exact official
+                // song/artist match even when the video has a long intro or outro.
+                TrackMatcher.bestOfficialAudioForVideo(candidates, target)?.let { match ->
+                    Log.d(TAG, "audio switch: accepted video/runtime drift '${song.title}' -> '${match.title}' ($query)")
+                    return match
+                }
             }
         }
         Log.w(TAG, "audio switch: no official song match for '${song.title}' by '${song.artist}'")

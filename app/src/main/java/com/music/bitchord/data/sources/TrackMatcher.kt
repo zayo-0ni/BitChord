@@ -86,6 +86,86 @@ object TrackMatcher {
         return listOf("$title $artist", title)
     }
 
+    /**
+     * The same recording under each name a bilingual upload gives it.
+     *
+     * A great many music-video uploads title themselves twice, once per script,
+     * with a pipe between:
+     *
+     *     Mahmoud El Turky - Ilaj 3youni (Official Video) 2026 | محمود التركي - علاج عيوني
+     *
+     * Read as one string that is neither name. [parseTitle] takes the head of
+     * the first separator it finds, hands it to [isArtistName], and gets back
+     * "no" — because the credit on the row is the *channel* ("AlNojomia"), not
+     * the artist printed in the title. So the head is kept as the title and
+     * everything after it is discarded as packaging, and the search that goes
+     * out is for `mahmoud el turky alnojomia`: the artist's name and the
+     * channel's, with the song's name thrown away. It finds nothing, which is
+     * the correct answer to the question that was actually asked.
+     *
+     * Each side of the pipe, though, is a well-formed `Artist - Title` on its
+     * own. So each becomes a target in its own right, with the head of its own
+     * dash as the credit — which is exactly the shape [parseTitle] already
+     * knows how to read. The catalogue lists this track in Arabic, so it is the
+     * Arabic segment that finds it.
+     *
+     * This widens what is *asked*, never what is accepted: every candidate that
+     * comes back is still judged by [best] or [bestOfficialAudioForVideo]
+     * against the segment that found it, title and credit both. A search that
+     * cannot name the song cannot match it either, and that was the whole
+     * failure — not a bar set too high, a question asked about the wrong words.
+     */
+    fun aliases(target: Target): List<Target> {
+        val segments = target.title.split(PIPE).map { it.trim() }.filter { it.isNotBlank() }
+        if (segments.size < 2) return listOf(target)
+        val out = mutableListOf(target)
+        for (raw in segments) {
+            val segment = withoutReleaseYear(raw)
+            val dash = DASH.find(segment)
+            if (dash == null) {
+                out += target.copy(title = segment)
+                continue
+            }
+            val credit = segment.substring(0, dash.range.first).trim()
+            val rest = segment.substring(dash.range.last + 1).trim()
+            // Both halves have to be there for the segment to be an
+            // "Artist - Title": a leading or trailing dash is punctuation.
+            if (credit.isBlank() || rest.isBlank()) {
+                out += target.copy(title = segment)
+                continue
+            }
+            out += target.copy(title = segment, artist = credit)
+        }
+        return out.distinctBy { it.title to it.artist }
+    }
+
+    /**
+     * A segment without the release year an upload signs itself with.
+     *
+     * `... - Ilaj 3youni (Official Video) 2026` against a catalogue listing of
+     * `Ilaj 3youni`: same recording, and the identity comparison fails on a
+     * number that is the upload's date rather than any part of the song's name.
+     *
+     * Deliberately only here, and only at the end of a segment that has other
+     * words left. Titles legitimately are years — *1989*, *2112* — and the
+     * general [parseTitle] is what the source ladder matches whole streams on,
+     * where a wrong pairing costs the listener a different recording. This path
+     * has already narrowed to "the catalogue cut of this specific video", so
+     * the trailing-token rule can be applied where it is safe rather than
+     * everywhere it would sometimes help.
+     */
+    private fun withoutReleaseYear(segment: String): String {
+        val words = segment.trim().split(WORD_SPLIT).filter { it.isNotEmpty() }
+        if (words.size < 2) return segment
+        val last = words.last()
+        val year = last.toIntOrNull()
+        return if (last.length == 4 && year != null && year in 1900..2099) {
+            words.dropLast(1).joinToString(" ")
+        } else {
+            segment
+        }
+    }
+
     /** The title with the packaging taken off, version markers kept. */
     internal fun searchableTitle(title: String, artist: String = ""): String =
         parseTitle(title, artist).let { (it.words + it.versions).joinToString(" ") }
@@ -600,9 +680,32 @@ object TrackMatcher {
 
     private val BRACKETED = Regex("""[(\[]([^()\[\]]*)[)\]]""")
     private val DASH = Regex("""\s+[-–—|]+\s+""")
+
+    /** Pipe only — what separates one whole naming of a track from another. */
+    private val PIPE = Regex("""\s*\|\s*""")
     private val FEATURING = Regex("""\b(feat|ft|featuring|with)\b.*""")
     private val WORD_SPLIT = Regex("""[\s.·]+""")
-    private val NON_ALNUM = Regex("""[^a-z0-9]""")
+    /**
+     * Everything that is not a letter or a digit, in any script.
+     *
+     * Was `[^a-z0-9]`, which does not mean "punctuation": it means every
+     * character outside the English alphabet, so an Arabic, Cyrillic, Hindi,
+     * Japanese or Korean title was erased down to an empty string. An empty
+     * core cannot equal anything, and [bestOfficialAudioForVideo] returns null
+     * on one outright — so for a catalogue that lists a track under its own
+     * script, every comparison in here was answering "not the same recording"
+     * about two spellings of the same recording, and no non-Latin track could
+     * ever be matched by anything that asks this class.
+     *
+     * [QueueBuilder][com.music.bitchord.playback.QueueBuilder] normalises with
+     * `\p{L}\p{N}` already, and the two have to agree: one deciding two entries
+     * are the same recording while the other cannot read either of their names
+     * is how a de-duplicated queue still plays a song twice.
+     *
+     * Combining marks are still dropped, which is the intent — Arabic
+     * harakat and Latin accents are spelling, not identity.
+     */
+    private val NON_ALNUM = Regex("""[^\p{L}\p{N}]""")
     private val ARTIST_SEPARATORS =
         Regex("""\s*(?:[,&/;·|]|\band\b|\bx\b|\bvs\.?\b|\bfeat\.?\b|\bft\.?\b|\bfeaturing\b|\bwith\b)\s*""")
 
