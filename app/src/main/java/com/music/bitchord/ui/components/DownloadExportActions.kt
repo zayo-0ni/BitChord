@@ -38,7 +38,7 @@ internal fun rememberDownloadExportActions(): (List<Song>, String, Boolean) -> U
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
-                message(context.getString(R.string.export_failed))
+                message(context.getString(R.string.audio_export_failed))
             } finally { busy = false }
         }
     }
@@ -57,7 +57,7 @@ internal fun rememberDownloadExportActions(): (List<Song>, String, Boolean) -> U
                 throw cancelled
             } catch (error: Exception) {
                 pending = arrayListOf()
-                message(error.message ?: context.getString(R.string.export_failed))
+                message(error.message ?: context.getString(R.string.audio_export_failed))
             } finally { busy = false }
         }
     }

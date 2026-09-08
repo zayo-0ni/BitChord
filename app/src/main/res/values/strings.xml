@@ -711,6 +711,6 @@
     <string name="save_audio_folder">Save to folder…</string>
     <string name="export_download_first">Download all selected songs first. Some files are missing.</string>
     <string name="export_preparing">Preparing files…</string>
-    <string name="export_failed">Could not export files. Check folder access and free space.</string>
+    <string name="audio_export_failed">Could not export files. Check folder access and free space.</string>
     <string name="export_saved">Saved %1$d of %2$d files.</string>
 </resources>

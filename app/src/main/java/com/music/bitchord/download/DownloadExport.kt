@@ -95,7 +95,7 @@ internal object DownloadExport {
         val parent = DocumentsContract.buildDocumentUriUsingTree(tree, DocumentsContract.getTreeDocumentId(tree))
         val folder = if (uris.size > 1) {
             DocumentsContract.createDocument(resolver, parent, DocumentsContract.Document.MIME_TYPE_DIR,
-                DownloadFolders.component(title)) ?: error(context.getString(R.string.export_failed))
+                DownloadFolders.component(title)) ?: error(context.getString(R.string.audio_export_failed))
         } else parent
         var saved = 0
         for (uri in uris) {
@@ -109,7 +109,7 @@ internal object DownloadExport {
                     ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.'))
                     ?: "application/octet-stream"
                 val created = DocumentsContract.createDocument(resolver, folder, mime, name)
-                    ?: error(context.getString(R.string.export_failed))
+                    ?: error(context.getString(R.string.audio_export_failed))
                 target = created
                 resolver.openInputStream(uri).use { input ->
                     requireNotNull(input)
