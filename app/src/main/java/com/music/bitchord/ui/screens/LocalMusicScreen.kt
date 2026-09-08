@@ -64,6 +64,7 @@ import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.TextButton
 import androidx.compose.material3.Tab
+import androidx.compose.material.icons.rounded.MoreVert
 import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.material3.ScrollableTabRow
 import androidx.compose.material3.TabRowDefaults
@@ -242,6 +243,14 @@ fun LocalMusicScreen(
         if (selectingDownloads) {
             DownloadSelectionBar(
                 count = selectedDownloadIds.size,
+                onMore = onCollectionLongPress?.let { more ->
+                    {
+                        val chosen = songs.filter { it.videoId in selectedDownloadIds }
+                        selectedDownloadIds = emptySet()
+                        selectedAlbumKeys = emptySet()
+                        more(chosen.firstOrNull()?.albumName ?: "BitChord", chosen)
+                    }
+                },
                 allSelected = sortedSongs.isNotEmpty() && selectedDownloadIds.containsAll(sortedSongs.map { it.videoId }),
                 onSelectAll = { selectedDownloadIds = sortedSongs.mapTo(linkedSetOf()) { it.videoId } },
                 onDelete = {
@@ -1512,6 +1521,7 @@ private fun LocalMusicSort.localizedLabel(): String = when (this) {
 @Composable
 private fun DownloadSelectionBar(
     count: Int,
+    onMore: (() -> Unit)? = null,
     allSelected: Boolean,
     onSelectAll: () -> Unit,
     onDelete: () -> Unit,
@@ -1540,6 +1550,11 @@ private fun DownloadSelectionBar(
             color = if (isSystemInDarkTheme()) Color.White else MaterialTheme.colorScheme.onSurfaceVariant,
             modifier = Modifier.weight(1f),
         )
+        onMore?.let { action ->
+            IconButton(onClick = action, enabled = count > 0) {
+                Icon(Icons.Rounded.MoreVert, contentDescription = stringResource(R.string.more))
+            }
+        }
         TextButton(onClick = onDelete, enabled = count > 0) {
             Icon(
                 Icons.Rounded.Delete,

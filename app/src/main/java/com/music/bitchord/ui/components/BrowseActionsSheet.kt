@@ -21,6 +21,8 @@ import androidx.compose.material.icons.rounded.PlayArrow
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.FolderOpen
+import androidx.compose.material.icons.rounded.Share
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -129,6 +131,8 @@ fun BrowseActionsSheet(
     target: BrowseTarget,
     onPlayNext: () -> Unit,
     onAddToQueue: () -> Unit,
+    onShareFiles: (() -> Unit)? = null,
+    onSaveFiles: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     onPlay: (() -> Unit)? = null,
     onShuffle: (() -> Unit)? = null,
@@ -185,6 +189,12 @@ fun BrowseActionsSheet(
             stringResource(R.string.add_to_queue),
             onClick = onAddToQueue,
         )
+        onShareFiles?.let {
+            ActionRow(Icons.Rounded.Share, stringResource(R.string.share_audio_files), onClick = it)
+        }
+        onSaveFiles?.let {
+            ActionRow(Icons.Rounded.FolderOpen, stringResource(R.string.save_audio_folder), onClick = it)
+        }
         onDownloadAll?.let { download ->
             // Saying which of the three it is, rather than offering the same row
             // whatever the state — this is where a release is asked for now that

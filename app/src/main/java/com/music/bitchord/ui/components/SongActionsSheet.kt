@@ -50,6 +50,7 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material.icons.rounded.FolderOpen
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.getValue
@@ -127,6 +128,8 @@ fun SongActionsSheet(
     onAddToPlaylist: () -> Unit,
     onOpenAlbum: (String) -> Unit,
     onOpenArtist: (String) -> Unit,
+    onShareFiles: (() -> Unit)? = null,
+    onSaveFiles: (() -> Unit)? = null,
     modifier: Modifier = Modifier,
     onRemoveFromPlaylist: (() -> Unit)? = null,
     showSleepTimer: Boolean = false,
@@ -296,6 +299,12 @@ fun SongActionsSheet(
                 value = sleepTimerStatus(),
                 accent = palette.accent,
             ) { pickingSleepTimer = true }
+        }
+        onShareFiles?.let {
+            ActionRow(Icons.Rounded.Share, stringResource(R.string.share_audio_files), onClick = it)
+        }
+        onSaveFiles?.let {
+            ActionRow(Icons.Rounded.FolderOpen, stringResource(R.string.save_audio_folder), onClick = it)
         }
         if (!isOffline) {
             onShare?.let {

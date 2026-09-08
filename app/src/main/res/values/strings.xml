@@ -707,4 +707,10 @@
     <string name="switch_profile_hint">Switch using the avatar, then use this profile.</string>
     <string name="profile_unavailable">No signed-in profile is available on this page yet.</string>
     <string name="no_downloaded_playlists">No downloaded playlists yet. Download a playlist to browse its songs in one folder.</string>
+    <string name="share_audio_files">Share audio files</string>
+    <string name="save_audio_folder">Save to folder…</string>
+    <string name="export_download_first">Download all selected songs first. Some files are missing.</string>
+    <string name="export_preparing">Preparing files…</string>
+    <string name="export_failed">Could not export files. Check folder access and free space.</string>
+    <string name="export_saved">Saved %1$d of %2$d files.</string>
 </resources>

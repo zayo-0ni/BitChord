@@ -154,6 +154,7 @@ import com.music.bitchord.download.DownloadTarget
 import com.music.bitchord.download.Downloads
 import com.music.bitchord.ui.components.BrowseActionsSheet
 import com.music.bitchord.ui.components.BrowseTarget
+import com.music.bitchord.ui.components.rememberDownloadExportActions
 import com.music.bitchord.ui.components.DownloadManagerSheet
 import com.music.bitchord.ui.components.PlaylistPickerSheet
 import com.music.bitchord.ui.components.SongActionsSheet
@@ -1198,6 +1199,7 @@ private fun BitChordApp(
     // it decomposed into — see [Downloads.rememberCollection]. Null for a single
     // track, which is not a release however many of them are asked for one at a
     // time.
+    val exportFiles = rememberDownloadExportActions()
     val startDownload: (List<Song>, DownloadTarget?) -> Unit = { requested, from ->
         val saved = Downloads.saved.value
         // Already on disk, and already queued or running: neither needs asking
@@ -2633,6 +2635,14 @@ private fun BitChordApp(
                     // this row to build a link from — SongActionsSheet already
                     // drops it for a local file via `isOffline`, this catches
                     // the rest.
+                    onShareFiles = {
+                        songActions = null
+                        exportFiles(listOf(song), song.title, false)
+                    }.takeIf { song.localUri != null || song.videoId in savedDownloads },
+                    onSaveFiles = {
+                        songActions = null
+                        exportFiles(listOf(song), song.title, true)
+                    }.takeIf { song.localUri != null || song.videoId in savedDownloads },
                     onShare = share.takeIf { song.videoId.isNotBlank() },
                     onCopyLog = if (fromPlayer) {
                         {
@@ -2758,6 +2768,8 @@ private fun BitChordApp(
                 BrowseActionsSheet(
                     // The live answer, not the one the target was built with.
                     target = target.copy(playlist = playlist),
+                    onShareFiles = act { songs -> exportFiles(songs, target.title, false) },
+                    onSaveFiles = act { songs -> exportFiles(songs, target.title, true) },
                     onPlayNext = act(playSongsNext),
                     onAddToQueue = act(addSongsToQueue),
                     onPlay = act { songs -> play(songs, 0) }.takeIf { target.fromCard },
