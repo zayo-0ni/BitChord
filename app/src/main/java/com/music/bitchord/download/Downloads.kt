@@ -749,6 +749,10 @@ object Downloads {
         val track = song
         val collection = synchronized(lock) { destinations[song.videoId] }
         val folder = DownloadFolders.forSong(track, collection)
+        // The record carries identity even when exported filenames are human-readable.
+        savedUri(context, song.videoId)?.let { uri ->
+            return@withContext Prepared(song.videoId, track, route = null, alreadyAt = uri, folder = folder)
+        }
         // Read once, here, for the whole of this track. Both routes below
         // and the re-resolve inside [Downloader.fetch] have to agree on
         // which rung they are fetching, and re-reading the setting per call

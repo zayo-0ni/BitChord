@@ -39,7 +39,18 @@ internal object DownloadExport {
         val session = File(root, UUID.randomUUID().toString()).apply { mkdirs() }
         try {
             originals.mapIndexed { index, (uri, song) ->
-                if (uri.scheme == "content") return@mapIndexed uri
+                if (uri.scheme == "content") {
+                    val name = context.contentResolver.query(uri, arrayOf(OpenableColumns.DISPLAY_NAME), null, null, null)?.use {
+                        if (it.moveToFirst()) it.getString(0) else null
+                    }
+                    if (name == null || name == DownloadFolders.visibleFileName(name)) return@mapIndexed uri
+                    val folder = File(session, index.toString()).apply { mkdirs() }
+                    val target = File(folder, File(DownloadFolders.visibleFileName(name)).name)
+                    context.contentResolver.openInputStream(uri).use { input ->
+                        target.outputStream().use { copy(requireNotNull(input), it) }
+                    }
+                    return@mapIndexed FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", target)
+                }
                 val source = File(requireNotNull(uri.path))
                 if (source.name == "playlist.m3u8") {
                     // Segmented offline audio needs all its companion files to remain usable.
@@ -60,10 +71,11 @@ internal object DownloadExport {
                 } else {
                     // Share private downloads directly, avoiding a second full album in cache.
                     try {
+                        require(source.name == DownloadFolders.visibleFileName(source.name))
                         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", source)
                     } catch (_: IllegalArgumentException) {
                         val folder = File(session, index.toString()).apply { mkdirs() }
-                        val target = File(folder, source.name)
+                        val target = File(folder, DownloadFolders.visibleFileName(source.name))
                         source.inputStream().use { input -> target.outputStream().use { copy(input, it) } }
                         FileProvider.getUriForFile(context, "${context.packageName}.fileprovider", target)
                     }
@@ -108,7 +120,7 @@ internal object DownloadExport {
                 val mime = resolver.getType(uri)
                     ?: MimeTypeMap.getSingleton().getMimeTypeFromExtension(name.substringAfterLast('.'))
                     ?: "application/octet-stream"
-                val created = DocumentsContract.createDocument(resolver, folder, mime, name)
+                val created = DocumentsContract.createDocument(resolver, folder, mime, DownloadFolders.visibleFileName(name))
                     ?: error(context.getString(R.string.audio_export_failed))
                 target = created
                 resolver.openInputStream(uri).use { input ->

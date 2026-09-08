@@ -272,7 +272,7 @@ object DownloadStore {
         }
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.Q) {
             val values = ContentValues().apply {
-                put(MediaStore.MediaColumns.DISPLAY_NAME, name)
+                put(MediaStore.MediaColumns.DISPLAY_NAME, DownloadFolders.visibleFileName(name))
                 put(MediaStore.MediaColumns.MIME_TYPE, mimeType)
                 put(MediaStore.MediaColumns.RELATIVE_PATH, "$relativePath/$folder/")
                 put(MediaStore.MediaColumns.IS_PENDING, 1)
@@ -293,12 +293,20 @@ object DownloadStore {
             return Pending(context, uri, name, part = null, target = null)
         }
 
-        val target = legacyFile(name, folder)
-        val directory = target.parentFile ?: error("No Music folder on this device")
+        val visible = DownloadFolders.visibleFileName(name)
+        val directory = legacyFile(visible, folder).parentFile ?: error("No Music folder on this device")
         if (!directory.exists() && !directory.mkdirs()) error("Could not create ${directory.path}")
-        val part = File(directory, "$name.part")
-        part.delete()
-        return Pending(context, Uri.fromFile(target), name, part = part, target = target)
+        var number = 0
+        while (true) {
+            val candidate = if (number == 0) visible else
+                "${visible.substringBeforeLast('.')} ($number).${visible.substringAfterLast('.')}"
+            val target = File(directory, candidate)
+            val part = File(directory, ".$candidate.part")
+            if (!target.exists() && part.createNewFile()) {
+                return Pending(context, Uri.fromFile(target), candidate, part = part, target = target)
+            }
+            number++
+        }
     }
 
     @Suppress("DEPRECATION")

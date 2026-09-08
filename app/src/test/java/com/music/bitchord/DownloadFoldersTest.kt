@@ -77,4 +77,11 @@ class DownloadFoldersTest {
         assertEquals(1, all.count { !it.playlist })
         assertEquals(2, all.map { it.key }.distinct().size)
     }
+    @Test fun `shared filenames remove only the generated code`() {
+        assertEquals("Shakira - Dai Dai.m4a",
+            DownloadFolders.visibleFileName("Shakira - Dai Dai [b4bf790ab202].m4a"))
+        assertEquals("Live [2024].flac", DownloadFolders.visibleFileName("Live [2024].flac"))
+        assertEquals("Song [Remix].m4a", DownloadFolders.visibleFileName("Song [Remix] [b4bf790ab202].m4a"))
+        assertEquals("Song.m4a", DownloadFolders.visibleFileName("Song.m4a"))
+    }
 }

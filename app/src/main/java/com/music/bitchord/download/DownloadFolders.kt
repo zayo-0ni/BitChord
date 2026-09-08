@@ -12,6 +12,10 @@ internal object DownloadFolders {
         else -> "Songs"
     }
 
+    /** Strip only BitChord's generated suffix; keep titles such as Live [2024]. */
+    fun visibleFileName(name: String): String =
+        name.replace(Regex(""" \[[0-9a-f]{12}\](?=\.[^.]+$)"""), "")
+
     fun withDetails(song: Song, collection: DownloadTarget?): Song {
         if (collection == null || collection.playlist) return song
         return song.copy(
