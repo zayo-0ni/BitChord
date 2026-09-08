@@ -1222,7 +1222,7 @@ private fun BitChordApp(
         val songs = requested
             .filter { it.videoId !in saved }
             .map { song ->
-                val cover = from?.thumbnailUrl
+                val cover = from?.takeUnless { it.playlist }?.thumbnailUrl
                 if (song.thumbnailUrl.isNullOrBlank() && !cover.isNullOrBlank()) {
                     song.copy(thumbnailUrl = cover)
                 } else {

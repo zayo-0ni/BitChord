@@ -33,6 +33,7 @@ jobs:
         --tests "com.music.bitchord.OfficialAudioMatcherTest"
         --tests "com.music.bitchord.SearchPagingTest"
         --tests "com.music.bitchord.SourcesTest"
+        --tests "com.music.bitchord.DownloadAudioSelectorTest"
         --tests "com.music.bitchord.DownloadFoldersTest"
         --tests "com.music.bitchord.DownloadStoreTest"
         --tests "com.music.bitchord.MediaTaggerTest"

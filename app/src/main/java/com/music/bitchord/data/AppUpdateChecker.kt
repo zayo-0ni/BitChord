@@ -31,6 +31,9 @@ import java.io.File
  * browser.
  */
 object AppUpdateChecker {
+    // This fork is updated through its own APK builds, never upstream releases.
+    private const val UPDATES_ENABLED = false
+
 
     data class UpdateInfo(
         val version: String,
@@ -66,6 +69,10 @@ object AppUpdateChecker {
     private var downloadCancelled = false
 
     suspend fun check() = withContext(Dispatchers.IO) {
+        if (!UPDATES_ENABLED) {
+            _available.value = null
+            return@withContext
+        }
         runCatching {
             val request = Request.Builder().url(LATEST_RELEASE_URL).build()
             val body = Http.client.newCall(request).execute().use { response ->
@@ -118,6 +125,7 @@ object AppUpdateChecker {
      * download.
      */
     suspend fun downloadApk(context: Context): Unit = withContext(Dispatchers.IO) {
+        if (!UPDATES_ENABLED) return@withContext
         val info = _available.value ?: return@withContext
         val url = info.apkUrl ?: return@withContext
         downloadCancelled = false
@@ -184,6 +192,7 @@ object AppUpdateChecker {
      * the user is sent to that one switch first and taps Install again after.
      */
     fun installApk(context: Context, file: File) {
+        if (!UPDATES_ENABLED) return
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O &&
             !context.packageManager.canRequestPackageInstalls()
         ) {

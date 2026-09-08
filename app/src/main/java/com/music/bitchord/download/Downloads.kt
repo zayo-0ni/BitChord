@@ -6,6 +6,8 @@ import android.content.SharedPreferences
 import android.net.Uri
 import com.music.bitchord.data.DebugLog as Log
 import androidx.core.content.ContextCompat
+import com.music.bitchord.data.YtMusicRepository
+import com.music.bitchord.playback.OriginalVersion
 import com.music.bitchord.data.innertube.StreamResolver
 import com.music.bitchord.data.model.Song
 import com.music.bitchord.data.settings.AppSettings
@@ -18,6 +20,8 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.Deferred
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.coroutines.async
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -68,6 +72,11 @@ sealed interface DownloadState {
 object Downloads {
 
     private const val TAG = "BitChord"
+    private val transferLocks = Array(32) { Mutex() }
+    private val audioSelector = DownloadAudioSelector(
+        resolve = { YtMusicRepository.resolveAudio(it) },
+        onFailure = { Log.w(TAG, "Download audio lookup failed; keeping original: ${it.message}") },
+    )
     private const val KEY_SAVED_METADATA = "downloaded_tracks_metadata"
     private const val KEY_SAVED_COLLECTIONS = "downloaded_collections"
 
@@ -711,7 +720,9 @@ object Downloads {
             // being written. Corrected here rather than left to disagree with
             // the notification and with the Downloads page afterwards.
             DownloadSession.retitle(id, plan.track)
-            transfer(context, song, plan)
+            // Video and audio entries in one playlist can resolve to the same file.
+            val lockIndex = (plan.track.videoId.hashCode() and Int.MAX_VALUE) % transferLocks.size
+            transferLocks[lockIndex].withLock { transfer(context, song, plan) }
         } catch (e: CancellationException) {
             clear(id)
             throw e
@@ -743,14 +754,14 @@ object Downloads {
      * before its turn — and a preparation is not a download.
      */
     internal suspend fun prepare(context: Context, song: Song): Prepared = withContext(Dispatchers.IO) {
-        // Downloads preserve the exact item the listener picked. Catalogue
-        // matching is a manual playback action and must not silently change a
-        // download or its filename.
-        val track = song
         val collection = synchronized(lock) { destinations[song.videoId] }
+        val track = DownloadFolders.withDetails(
+            audioSelector.select(song, AppSettings.autoAudioVersion.value, OriginalVersion.isPinned(song.videoId)),
+            collection,
+        )
         val folder = DownloadFolders.forSong(track, collection)
         // The record carries identity even when exported filenames are human-readable.
-        savedUri(context, song.videoId)?.let { uri ->
+        savedUri(context, track.videoId)?.let { uri ->
             return@withContext Prepared(song.videoId, track, route = null, alreadyAt = uri, folder = folder)
         }
         // Read once, here, for the whole of this track. Both routes below
@@ -814,7 +825,7 @@ object Downloads {
 
         // Already there from a previous run the record lost track of — adopt it
         // rather than writing a second copy beside it.
-        plan.alreadyAt?.let { uri ->
+        (savedUri(context, track.videoId) ?: plan.alreadyAt)?.let { uri ->
             remember(context, song, track, uri)
             DownloadSession.done(id)
             clear(id)
